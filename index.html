@@ -1242,6 +1242,29 @@ button{-webkit-tap-highlight-color:transparent}
 <!-- v40: corrected page-turn geometry; removed whole-spread cross-fade that duplicated content during curl. -->
 <!-- v41: collision-proof physical-store pill spacing with adaptive label fit. -->
 <!-- v46: removed the silver/gray photographed outer rim baked into each source cover image. -->
+<style id="vpc-mobile-reader-20261115">
+@media (max-width:700px){
+  #reader .reader-stage{
+    height:100dvh!important; min-height:0!important; box-sizing:border-box!important;
+    padding:74px 8px 54px!important;
+    display:flex!important; align-items:center!important; justify-content:center!important;
+  }
+  #reader .book-wrap{
+    flex:none!important; width:min(96vw,calc((100dvh - 150px) * 1.48))!important;
+    height:auto!important; aspect-ratio:1.48 / 1!important;
+    max-height:calc(100dvh - 150px)!important;
+  }
+  #reader .turn-hint{
+    bottom:-29px!important; font-size:10px!important; max-width:76vw!important;
+    text-align:center!important; letter-spacing:0!important;
+  }
+  #reader .spread-counter{bottom:-29px!important;font-size:10px!important;right:2%!important;}
+}
+@media (max-width:380px){
+  #reader .turn-hint{font-size:9px!important;max-width:78vw!important;}
+  #reader .spread-counter{font-size:9px!important;}
+}
+</style>
 </head>
 <body>
 <main id="office" aria-label="VPC Publishing office">
@@ -1331,7 +1354,7 @@ function retailPill(g,text,cx,cy,w){const h=Math.max(38,Math.min(46,H*.065)),x=c
 function drawRetailActions(g,side){const mobile=window.matchMedia&&window.matchMedia('(max-width:700px)').matches;const labelY=H*(mobile ? .78 : .80),pillY=H*(mobile ? .89 : .86);if(side==='left'){retailLabel(g,'Official online store',labelY);retailPill(g,'VPC Lazada',PW*.5,pillY,Math.min(PW*(mobile ? .60 : .55),150));}else{retailLabel(g,'Check branch availability',labelY);const leftCx=PW*(mobile?.26:.27),rightCx=PW*(mobile?.74:.73),leftW=Math.min(PW*(mobile?.43:.40),160),rightW=Math.min(PW*(mobile?.34:.36),135);retailPill(g,'National Book Store',leftCx,pillY,leftW);retailPill(g,'Fully Booked',rightCx,pillY,rightW);}}
 function makePage(side,backside=false,spreadIndex=spread){const c=document.createElement('canvas');c.width=Math.max(2,Math.round(PW*DPR));c.height=Math.max(2,Math.round(H*DPR));const g=c.getContext('2d');g.scale(DPR,DPR);paper(g);const b=current(),s=clamp(spreadIndex,0,MAX_SPREADS-1);
   if(s===0){
-    if(side==='left'){heading(g,'VPC Publishing');bodyText(g,'I’d Like to Speak Filipino, a four-volume learning series by Victoria P. Carlos.',.40);smallCaps(g,'Select a volume • turn the pages',.80)}
+    if(side==='left'){heading(g,'VPC Publishing');bodyText(g,'I’d Like to Speak Filipino, a four-volume learning series by Victoria P. Carlos.',.40);/* Introductory spread: no redundant volume-selection instruction. */}
     else{heading(g,b.title);bodyText(g,b.filipino+'\n\n'+b.level,.39);smallCaps(g,'Victoria P. Carlos',.84)}
   }
   else if(s===1){
