@@ -1,0 +1,33 @@
+name: VPC mobile book layout diagnostics
+on:
+  push:
+    paths:
+      - .github/workflows/vpc-mobile-layout.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect published HTML (read only)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          print('index chars:',len(s),'lines:',s.count('\n')+1)
+          needles=['SELECT A VOLUME','TURN THE PAGES','Drag a bottom corner','Back to office','Volume 4','bookSpread','book-wrap','<meta name="viewport"']
+          for needle in needles:
+            print('\n=== NEEDLE:',needle,'===')
+            matches=list(re.finditer(re.escape(needle),s,re.I))
+            print('matches:',len(matches))
+            for m in matches[:4]:
+              a=max(0,m.start()-650);b=min(len(s),m.end()+750)
+              print('position',m.start(),re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+','[EMBEDDED IMAGE]',s[a:b]))
+          print('\n=== MEDIA QUERIES ===')
+          for m in list(re.finditer(r'@media[^\\{]{0,130}\\{',s))[:24]:
+            print('position',m.start(),s[m.start():m.start()+130])
+          PY
