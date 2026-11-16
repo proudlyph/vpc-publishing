@@ -1,0 +1,93 @@
+name: Publish VPC social preview metadata
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-social-preview-apply-20261116.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update-social-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install minimal social metadata without touching VPC interaction code
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          page = Path('index.html')
+          image = Path('social-preview-vpc-20261116.jpg')
+          if not image.exists() or image.stat().st_size < 10000:
+              raise SystemExit('Social preview JPG is missing or unexpectedly small')
+          html = page.read_text(encoding='utf-8')
+          close = re.search(r'</head\s*>', html, flags=re.IGNORECASE)
+          if not close:
+              raise SystemExit('No </head> found; no changes made')
+
+          head = html[:close.start()]
+          tail = html[close.start():]
+          marker = 'vpc-social-preview-v20261116'
+          if marker in head:
+              print('Metadata already installed; no change required')
+              raise SystemExit(0)
+
+          # Remove obsolete Open Graph / Twitter cards from HEAD only.
+          # Leave the rest of the 11 MB site (including book and mobile JS) unchanged.
+          def remove_old_card(match):
+              tag = match.group(0)
+              attrs = {
+                  k.lower(): v.lower()
+                  for k, v in re.findall(r'''([\w:-]+)\s*=\s*["']([^"']*)["']''', tag)
+              }
+              if attrs.get('property', '').startswith('og:'):
+                  return ''
+              if attrs.get('name', '').startswith('og:'):
+                  return ''
+              if attrs.get('name', '').startswith('twitter:'):
+                  return ''
+              return tag
+          head = re.sub(r'<meta\b[^>]*>', remove_old_card, head, flags=re.IGNORECASE)
+
+          new_meta = '''
+          <!-- vpc-social-preview-v20261116 -->
+          <meta property="og:type" content="website">
+          <meta property="og:url" content="https://vpcpublishing.proudlyph.com/">
+          <meta property="og:site_name" content="VPC Publishing">
+          <meta property="og:title" content="VPC Publishing | Books by Victoria P. Carlos">
+          <meta property="og:description" content="Explore VPC Publishing and I'd Like to Speak Filipino by Victoria P. Carlos.">
+          <meta property="og:image" content="https://vpcpublishing.proudlyph.com/social-preview-vpc-20261116.jpg">
+          <meta property="og:image:secure_url" content="https://vpcpublishing.proudlyph.com/social-preview-vpc-20261116.jpg">
+          <meta property="og:image:type" content="image/jpeg">
+          <meta property="og:image:width" content="1200">
+          <meta property="og:image:height" content="630">
+          <meta property="og:image:alt" content="VPC Publishing - I'd Like to Speak Filipino, by Victoria P. Carlos, with the original circular bilingual logo">
+          <meta name="twitter:card" content="summary_large_image">
+          <meta name="twitter:title" content="VPC Publishing | Books by Victoria P. Carlos">
+          <meta name="twitter:description" content="Explore VPC Publishing and I'd Like to Speak Filipino by Victoria P. Carlos.">
+          <meta name="twitter:image" content="https://vpcpublishing.proudlyph.com/social-preview-vpc-20261116.jpg">
+          <meta name="twitter:image:alt" content="VPC Publishing with original I'd Like to Speak Filipino logo">
+          <!-- /vpc-social-preview-v20261116 -->
+          '''
+          updated = head + new_meta + tail
+          if updated.count('vpc-social-preview-v20261116') != 2:
+              raise SystemExit('Metadata insertion validation failed')
+          page.write_text(updated, encoding='utf-8')
+          print('Inserted VPC Open Graph and Twitter metadata with 1200x630 asset')
+          PY
+          git diff --check
+          grep -q 'vpc-social-preview-v20261116' index.html
+      - name: Commit social metadata into live site
+        shell: bash
+        run: |
+          if ! git diff --quiet -- index.html; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add index.html
+            git commit -m 'Set VPC social preview tags for mobile and desktop'
+            git push origin HEAD:main
+          else
+            echo 'Social metadata already present'
+          fi
