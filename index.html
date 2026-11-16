@@ -1265,6 +1265,75 @@ button{-webkit-tap-highlight-color:transparent}
   #reader .spread-counter{font-size:9px!important;}
 }
 </style>
+<style id="vpc-mobile-retail-controls-20261116">
+@media(max-width:700px){
+  /* Canvas renders the buttons. These invisible HTML anchors are the exact tap targets. */
+  #reader .page-actions-online.show,
+  #reader .page-actions-physical.show{
+    display:block!important;
+    opacity:0!important;
+    pointer-events:none!important;
+    position:absolute!important;
+    top:0!important;
+    bottom:auto!important;
+    height:100%!important;
+    padding:0!important;
+    margin:0!important;
+    transform:none!important;
+  }
+  #reader .page-actions-online{left:6%!important;right:auto!important;width:38%!important}
+  #reader .page-actions-physical{left:55%!important;right:auto!important;width:40%!important}
+  #reader .page-actions-label{display:none!important}
+  #reader .page-actions-online>a{
+    position:absolute!important;
+    left:0!important;top:85%!important;
+    transform:translateY(-50%)!important;
+    width:100%!important;
+    height:min(36px,10.5%)!important;
+    min-height:0!important;
+    padding:0!important;
+    box-sizing:border-box!important;
+    pointer-events:auto!important;
+  }
+  #reader .physical-store-buttons{
+    position:absolute!important;
+    top:0!important;left:0!important;
+    width:100%!important;height:100%!important;
+    display:block!important;
+    margin:0!important;padding:0!important;
+    pointer-events:none!important;
+  }
+  #reader .page-actions-physical a{
+    position:absolute!important;
+    left:0!important;
+    width:100%!important;
+    height:min(36px,10.5%)!important;
+    min-height:0!important;
+    padding:0!important;
+    box-sizing:border-box!important;
+    transform:translateY(-50%)!important;
+    pointer-events:auto!important;
+  }
+  #reader .page-actions-physical a:first-child{top:79%!important}
+  #reader .page-actions-physical a:last-child{top:91%!important}
+  /* Hint and page number must never share the same text line. */
+  #reader .turn-hint{
+    width:100%!important;
+    max-width:none!important;
+    bottom:-36px!important;
+    white-space:normal!important;
+    text-align:center!important;
+    line-height:1.2!important;
+    font-size:10px!important;
+  }
+  #reader .spread-counter{
+    bottom:-56px!important;
+    right:50%!important;
+    transform:translateX(50%)!important;
+    font-size:10px!important;
+  }
+}
+</style>
 </head>
 <body>
 <main id="office" aria-label="VPC Publishing office">
@@ -1349,9 +1418,52 @@ function heading(g,text){g.fillStyle='#3a2a1d';g.font=`700 ${Math.max(15,Math.mi
 function bodyText(g,text,y=.38){g.fillStyle='#4d3a29';g.font=`400 ${Math.max(10,Math.min(PW*.033,16))}px Georgia,serif`;g.textAlign='left';const lh=Math.max(15,PW*.046),lines=wrapText(g,text,PW*.73);drawLines(g,lines,PW*.13,H*y,lh,11)}
 function smallCaps(g,text,y=.82){g.fillStyle='#7d6248';g.font=`700 ${Math.max(8,Math.min(PW*.022,11))}px system-ui,sans-serif`;g.textAlign='left';g.fillText(String(text).toUpperCase(),PW*.13,H*y)}
 function roundRectPath(g,x,y,w,h,r){const rr=Math.min(r,w/2,h/2);g.beginPath();g.moveTo(x+rr,y);g.arcTo(x+w,y,x+w,y+h,rr);g.arcTo(x+w,y+h,x,y+h,rr);g.arcTo(x,y+h,x,y,rr);g.arcTo(x,y,x+w,y,rr);g.closePath()}
-function retailLabel(g,text,y){g.save();g.fillStyle='#7a6859';g.font=`700 ${Math.max(8,Math.min(PW*.022,10))}px system-ui,sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText(String(text).toUpperCase(),PW*.5,y);g.restore()}
-function retailPill(g,text,cx,cy,w){const h=Math.max(38,Math.min(46,H*.065)),x=cx-w/2,y=cy-h/2;g.save();roundRectPath(g,x,y,w,h,h/2);g.fillStyle='#4a3022';g.shadowColor='rgba(45,29,18,.18)';g.shadowBlur=12;g.shadowOffsetY=6;g.fill();g.shadowColor='transparent';g.strokeStyle='rgba(255,255,255,.14)';g.lineWidth=1;g.stroke();g.fillStyle='#fffaf1';let fs=Math.max(10,Math.min(PW*.03,13));g.font=`700 ${fs}px system-ui,sans-serif`;const maxTextW=Math.max(40,w-24);while(fs>8.5&&g.measureText(text).width>maxTextW){fs-=.5;g.font=`700 ${fs}px system-ui,sans-serif`}g.textAlign='center';g.textBaseline='middle';g.fillText(text,cx,cy+1);g.restore()}
-function drawRetailActions(g,side){const mobile=window.matchMedia&&window.matchMedia('(max-width:700px)').matches;const labelY=H*(mobile ? .78 : .80),pillY=H*(mobile ? .89 : .86);if(side==='left'){retailLabel(g,'Official online store',labelY);retailPill(g,'VPC Lazada',PW*.5,pillY,Math.min(PW*(mobile ? .60 : .55),150));}else{retailLabel(g,'Check branch availability',labelY);const leftCx=PW*(mobile?.26:.27),rightCx=PW*(mobile?.74:.73),leftW=Math.min(PW*(mobile?.43:.40),160),rightW=Math.min(PW*(mobile?.34:.36),135);retailPill(g,'National Book Store',leftCx,pillY,leftW);retailPill(g,'Fully Booked',rightCx,pillY,rightW);}}
+function retailLabel(g,text,y){
+  g.save();g.fillStyle='#7a6859';
+  const t=String(text).toUpperCase();
+  let fs=Math.max(8,Math.min(PW*.022,10));
+  g.font=`700 ${fs}px system-ui,sans-serif`;
+  while(fs>7&&g.measureText(t).width>PW*.82){fs-=.5;g.font=`700 ${fs}px system-ui,sans-serif`}
+  g.textAlign='center';g.textBaseline='middle';g.fillText(t,PW*.5,y,PW*.86);g.restore()
+}
+function retailPill(g,text,cx,cy,w,customHeight){
+  const h=customHeight||Math.max(38,Math.min(46,H*.065)),x=cx-w/2,y=cy-h/2;
+  g.save();roundRectPath(g,x,y,w,h,h/2);g.fillStyle='#4a3022';
+  g.shadowColor='rgba(45,29,18,.18)';g.shadowBlur=12;g.shadowOffsetY=6;g.fill();
+  g.shadowColor='transparent';g.strokeStyle='rgba(255,255,255,.14)';g.lineWidth=1;g.stroke();
+  g.fillStyle='#fffaf1';let fs=Math.max(10,Math.min(PW*.03,13));
+  g.font=`700 ${fs}px system-ui,sans-serif`;
+  const maxTextW=Math.max(20,w-18);
+  while(fs>8.5&&g.measureText(text).width>maxTextW){fs-=.5;g.font=`700 ${fs}px system-ui,sans-serif`}
+  g.textAlign='center';g.textBaseline='middle';g.fillText(text,cx,cy+1,maxTextW);g.restore()
+}
+function drawRetailActions(g,side){
+  const mobile=window.matchMedia&&window.matchMedia('(max-width:700px)').matches;
+  if(mobile){
+    // A book page is only half the screen width. Never place two store names side by side.
+    const height=Math.max(22,Math.min(33,H*.10));
+    if(side==='left'){
+      retailLabel(g,'Official online store',H*.74);
+      retailPill(g,'VPC Lazada',PW*.5,H*.85,PW*.76,height);
+    }else{
+      retailLabel(g,'Check branch availability',H*.67);
+      retailPill(g,'National Book Store',PW*.5,H*.79,PW*.80,height);
+      retailPill(g,'Fully Booked',PW*.5,H*.91,PW*.80,height);
+    }
+    return;
+  }
+  // Keep the existing desktop layout unchanged.
+  const labelY=H*.80,pillY=H*.86;
+  if(side==='left'){
+    retailLabel(g,'Official online store',labelY);
+    retailPill(g,'VPC Lazada',PW*.5,pillY,Math.min(PW*.55,150));
+  }else{
+    retailLabel(g,'Check branch availability',labelY);
+    const leftCx=PW*.27,rightCx=PW*.73;
+    retailPill(g,'National Book Store',leftCx,pillY,Math.min(PW*.40,160));
+    retailPill(g,'Fully Booked',rightCx,pillY,Math.min(PW*.36,135));
+  }
+}
 function makePage(side,backside=false,spreadIndex=spread){const c=document.createElement('canvas');c.width=Math.max(2,Math.round(PW*DPR));c.height=Math.max(2,Math.round(H*DPR));const g=c.getContext('2d');g.scale(DPR,DPR);paper(g);const b=current(),s=clamp(spreadIndex,0,MAX_SPREADS-1);
   if(s===0){
     if(side==='left'){heading(g,'VPC Publishing');bodyText(g,'I’d Like to Speak Filipino, a four-volume learning series by Victoria P. Carlos.',.40);/* Introductory spread: no redundant volume-selection instruction. */}
