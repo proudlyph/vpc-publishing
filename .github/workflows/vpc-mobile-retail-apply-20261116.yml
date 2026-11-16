@@ -1,0 +1,190 @@
+name: Apply VPC mobile retail layout fix
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-mobile-retail-apply-20261116.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply-vpc-mobile-retail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply validated VPC retail patch only
+        shell: bash
+        run: |
+          python3 - index.html <<'PY'
+          #!/usr/bin/env python3
+          """Patch VPC Publishing's canvas book retail spread for narrow phone screens.
+          
+          Usage: python3 vpc_mobile_retail_fix.py /path/to/index.html
+          
+          The script is idempotent and fails rather than modifying unexpected versions.
+          It does not upload or publish anything.
+          """
+          from pathlib import Path
+          import re
+          import sys
+          
+          if len(sys.argv) != 2:
+              raise SystemExit("Usage: python3 vpc_mobile_retail_fix.py /path/to/index.html")
+          
+          path = Path(sys.argv[1])
+          s = path.read_text(encoding="utf-8")
+          marker = "vpc-mobile-retail-controls-20261116"
+          if marker in s:
+              print("Already patched; no changes")
+              raise SystemExit(0)
+          
+          needle = ("function retailLabel(g,text,y)", "function retailPill(g,text,cx,cy,w)",
+                    "function drawRetailActions(g,side)", "function makePage(side,backside=false,spreadIndex=spread)")
+          for target in needle:
+              if s.count(target) != 1:
+                  raise SystemExit(f"Expected one occurrence of {target!r}; found {s.count(target)}. No changes made.")
+          
+          start = s.index(needle[0])
+          end = s.index(needle[3], start)
+          original = s[start:end]
+          assert "National Book Store" in original and "Fully Booked" in original and "VPC Lazada" in original
+          replacement = '''function retailLabel(g,text,y){
+            g.save();g.fillStyle='#7a6859';
+            const t=String(text).toUpperCase();
+            let fs=Math.max(8,Math.min(PW*.022,10));
+            g.font=`700 ${fs}px system-ui,sans-serif`;
+            while(fs>7&&g.measureText(t).width>PW*.82){fs-=.5;g.font=`700 ${fs}px system-ui,sans-serif`}
+            g.textAlign='center';g.textBaseline='middle';g.fillText(t,PW*.5,y,PW*.86);g.restore()
+          }
+          function retailPill(g,text,cx,cy,w,customHeight){
+            const h=customHeight||Math.max(38,Math.min(46,H*.065)),x=cx-w/2,y=cy-h/2;
+            g.save();roundRectPath(g,x,y,w,h,h/2);g.fillStyle='#4a3022';
+            g.shadowColor='rgba(45,29,18,.18)';g.shadowBlur=12;g.shadowOffsetY=6;g.fill();
+            g.shadowColor='transparent';g.strokeStyle='rgba(255,255,255,.14)';g.lineWidth=1;g.stroke();
+            g.fillStyle='#fffaf1';let fs=Math.max(10,Math.min(PW*.03,13));
+            g.font=`700 ${fs}px system-ui,sans-serif`;
+            const maxTextW=Math.max(20,w-18);
+            while(fs>8.5&&g.measureText(text).width>maxTextW){fs-=.5;g.font=`700 ${fs}px system-ui,sans-serif`}
+            g.textAlign='center';g.textBaseline='middle';g.fillText(text,cx,cy+1,maxTextW);g.restore()
+          }
+          function drawRetailActions(g,side){
+            const mobile=window.matchMedia&&window.matchMedia('(max-width:700px)').matches;
+            if(mobile){
+              // A book page is only half the screen width. Never place two store names side by side.
+              const height=Math.max(22,Math.min(33,H*.10));
+              if(side==='left'){
+                retailLabel(g,'Official online store',H*.74);
+                retailPill(g,'VPC Lazada',PW*.5,H*.85,PW*.76,height);
+              }else{
+                retailLabel(g,'Check branch availability',H*.67);
+                retailPill(g,'National Book Store',PW*.5,H*.79,PW*.80,height);
+                retailPill(g,'Fully Booked',PW*.5,H*.91,PW*.80,height);
+              }
+              return;
+            }
+            // Keep the existing desktop layout unchanged.
+            const labelY=H*.80,pillY=H*.86;
+            if(side==='left'){
+              retailLabel(g,'Official online store',labelY);
+              retailPill(g,'VPC Lazada',PW*.5,pillY,Math.min(PW*.55,150));
+            }else{
+              retailLabel(g,'Check branch availability',labelY);
+              const leftCx=PW*.27,rightCx=PW*.73;
+              retailPill(g,'National Book Store',leftCx,pillY,Math.min(PW*.40,160));
+              retailPill(g,'Fully Booked',rightCx,pillY,Math.min(PW*.36,135));
+            }
+          }
+          '''
+          s = s[:start] + replacement + s[end:]
+          
+          style = '''<style id="vpc-mobile-retail-controls-20261116">
+          @media(max-width:700px){
+            /* Canvas renders the buttons. These invisible HTML anchors are the exact tap targets. */
+            #reader .page-actions-online.show,
+            #reader .page-actions-physical.show{
+              display:block!important;
+              opacity:0!important;
+              pointer-events:none!important;
+              position:absolute!important;
+              top:0!important;
+              bottom:auto!important;
+              height:100%!important;
+              padding:0!important;
+              margin:0!important;
+              transform:none!important;
+            }
+            #reader .page-actions-online{left:6%!important;right:auto!important;width:38%!important}
+            #reader .page-actions-physical{left:55%!important;right:auto!important;width:40%!important}
+            #reader .page-actions-label{display:none!important}
+            #reader .page-actions-online>a{
+              position:absolute!important;
+              left:0!important;top:85%!important;
+              transform:translateY(-50%)!important;
+              width:100%!important;
+              height:min(36px,10.5%)!important;
+              min-height:0!important;
+              padding:0!important;
+              box-sizing:border-box!important;
+              pointer-events:auto!important;
+            }
+            #reader .physical-store-buttons{
+              position:absolute!important;
+              top:0!important;left:0!important;
+              width:100%!important;height:100%!important;
+              display:block!important;
+              margin:0!important;padding:0!important;
+              pointer-events:none!important;
+            }
+            #reader .page-actions-physical a{
+              position:absolute!important;
+              left:0!important;
+              width:100%!important;
+              height:min(36px,10.5%)!important;
+              min-height:0!important;
+              padding:0!important;
+              box-sizing:border-box!important;
+              transform:translateY(-50%)!important;
+              pointer-events:auto!important;
+            }
+            #reader .page-actions-physical a:first-child{top:79%!important}
+            #reader .page-actions-physical a:last-child{top:91%!important}
+            /* Hint and page number must never share the same text line. */
+            #reader .turn-hint{
+              width:100%!important;
+              max-width:none!important;
+              bottom:-36px!important;
+              white-space:normal!important;
+              text-align:center!important;
+              line-height:1.2!important;
+              font-size:10px!important;
+            }
+            #reader .spread-counter{
+              bottom:-56px!important;
+              right:50%!important;
+              transform:translateX(50%)!important;
+              font-size:10px!important;
+            }
+          }
+          </style>
+          '''
+          if s.count("</head>") != 1:
+              raise SystemExit("Expected a unique </head>; no changes made")
+          s = s.replace("</head>", style + "</head>", 1)
+          if s.count(marker) != 1 or s.count("function drawRetailActions(g,side)") != 1:
+              raise SystemExit("Post-patch integrity check failed; no changes made")
+          path.write_text(s, encoding="utf-8")
+          print(f"Patched {path} ({path.stat().st_size:,} bytes).")
+          PY
+          git diff --check
+          grep -q 'vpc-mobile-retail-controls-20261116' index.html
+      - name: Commit corrected index.html
+        shell: bash
+        run: |
+          if ! git diff --quiet -- index.html; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add index.html
+            git commit -m 'Fix VPC mobile retail buttons and tap targets'
+            git push
+          else
+            echo 'Already patched, no changes needed'
+          fi
