@@ -1,0 +1,98 @@
+name: Fix VPC Messenger social preview at document start
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-fix-early-preview-20261116.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repair first-byte sharing metadata and remove QA title
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('index.html')
+          image = Path('social-preview-vpc-20261116.jpg')
+          assert image.is_file() and image.stat().st_size > 10000, 'Missing OG image'
+          html = p.read_text(encoding='utf-8')
+          opening = re.search(r'<head(?:\s[^>]*)?>', html, flags=re.I)
+          closing = re.search(r'</head\s*>', html, flags=re.I)
+          assert opening and closing and opening.end() < closing.start(), 'Unexpected HTML structure'
+          before, head, after = html[:opening.end()], html[opening.end():closing.start()], html[closing.start():]
+          old_titles = re.findall(r'<title\b[^>]*>(.*?)</title\s*>', head, flags=re.I|re.S)
+          print('Previous page titles:', old_titles)
+          print('Previous og:image tag count:', len(re.findall(r'<meta\b[^>]*(?:property|name)\s*=\s*["\']og:image', head, flags=re.I)))
+          head = re.sub(r'<title\b[^>]*>.*?</title\s*>', '', head, flags=re.I|re.S)
+          # Remove previous preview tags, including those inserted around line 1334.
+          def clean_meta(m):
+              s = m.group(0)
+              pairs = {a.lower():v.lower() for a,v in re.findall(r'([\w:-]+)\s*=\s*["\']([^"\']*)["\']',s)}
+              prop = pairs.get('property','')
+              name = pairs.get('name','')
+              if prop.startswith('og:') or name.startswith(('og:','twitter:')):
+                  return ''
+              if name == 'description' or 'charset' in pairs or 'charset=' in s.lower():
+                  return ''
+              return s
+          head = re.sub(r'<meta\b[^>]*>', clean_meta, head, flags=re.I)
+          # Remove old canonical link, if present, and supply one definitive URL.
+          def clean_link(m):
+              s = m.group(0)
+              pairs = {a.lower():v.lower() for a,v in re.findall(r'([\w:-]+)\s*=\s*["\']([^"\']*)["\']',s)}
+              return '' if pairs.get('rel') == 'canonical' else s
+          head = re.sub(r'<link\b[^>]*>', clean_link, head, flags=re.I)
+          head = re.sub(r'<!--\s*/?vpc-social-preview-v20261116\s*-->', '', head, flags=re.I)
+          early = """
+          <!-- VPC definitive social preview; kept within the first 2 KB for social crawlers -->
+          <meta charset="utf-8">
+          <title>VPC Publishing | Books by Victoria P. Carlos</title>
+          <meta name="description" content="Explore VPC Publishing and I'd Like to Speak Filipino by Victoria P. Carlos.">
+          <link rel="canonical" href="https://vpcpublishing.proudlyph.com/">
+          <meta property="og:type" content="website">
+          <meta property="og:url" content="https://vpcpublishing.proudlyph.com/">
+          <meta property="og:site_name" content="VPC Publishing">
+          <meta property="og:title" content="VPC Publishing | Books by Victoria P. Carlos">
+          <meta property="og:description" content="Explore VPC Publishing and I'd Like to Speak Filipino by Victoria P. Carlos.">
+          <meta property="og:image" content="https://vpcpublishing.proudlyph.com/social-preview-vpc-20261116.jpg">
+          <meta property="og:image:secure_url" content="https://vpcpublishing.proudlyph.com/social-preview-vpc-20261116.jpg">
+          <meta property="og:image:type" content="image/jpeg">
+          <meta property="og:image:width" content="1200">
+          <meta property="og:image:height" content="630">
+          <meta property="og:image:alt" content="VPC Publishing: I'd Like to Speak Filipino, by Victoria P. Carlos, with original bilingual logo">
+          <meta name="twitter:card" content="summary_large_image">
+          <meta name="twitter:title" content="VPC Publishing | Books by Victoria P. Carlos">
+          <meta name="twitter:description" content="Explore VPC Publishing and I'd Like to Speak Filipino by Victoria P. Carlos.">
+          <meta name="twitter:image" content="https://vpcpublishing.proudlyph.com/social-preview-vpc-20261116.jpg">
+          <meta name="twitter:image:alt" content="VPC Publishing logo and I'd Like to Speak Filipino">
+          <!-- /VPC definitive social preview -->
+          """
+          updated = before + early + head + after
+          start = updated.find('property="og:image"')
+          assert 0 < start < 3500, f'OG image must appear at beginning, found at byte {start}'
+          assert len(re.findall(r'<meta\s+property="og:image"', updated[:updated.index('</head>')], flags=re.I)) == 1
+          assert updated.count('VPC Publishing | Books by Victoria P. Carlos') >= 2
+          assert len(updated) > 11_000_000, 'Unexpectedly small site'
+          if updated != html:
+              p.write_text(updated, encoding='utf-8')
+          print('OG image metadata byte offset:', start, 'image bytes:', image.stat().st_size)
+          print('HTML size:', len(updated), 'bytes')
+          PY
+          git diff --check
+      - name: Commit narrow social meta repair
+        shell: bash
+        run: |
+          if ! git diff --quiet -- index.html; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add index.html
+            git commit -m 'Move VPC social preview to first bytes and remove QA page title'
+            git push origin HEAD:main
+          else
+            echo 'Already correct'
+          fi
