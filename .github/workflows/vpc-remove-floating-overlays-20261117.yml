@@ -1,0 +1,55 @@
+name: Remove broken VPC floating cover overlays
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-remove-floating-overlays-20261117.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  restore-shelf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Precisely remove only incorrect floating covers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          f=Path("index.html")
+          s=f.read_text(encoding="utf-8")
+          original=s
+          style=re.compile(r'\n?<style id="vpc-exact-front-covers-20261117">.*?</style>\n?', re.S)
+          s,count=style.subn("\n",s)
+          if count!=1 and 'vpc-authentic-cover' in s:
+              raise SystemExit("Unexpected floating cover stylesheet count: %d" % count)
+          covers = [
+              ('1','0','1'),('2','1','2'),('3','2','3'),('4','3','4')
+          ]
+          for book_index,data_book,volume in covers:
+              pat=re.compile(r'(<button class="art-hotspot art-book art-book-'+book_index+r'" aria-label="Open I’d Like to Speak Filipino '+volume+r'" data-book="'+data_book+r'" onclick="openReader\('+data_book+r'\)">)<img class="vpc-authentic-cover" src="assets/book-covers/vpc-filipino-'+book_index+r'-front.jpg" alt="Original front cover, Volume '+volume+r'" draggable="false" decoding="async"></button>')
+              s,n=pat.subn(r'\1</button>',s)
+              if n!=1:raise SystemExit(f'Expected one floating cover for Book {book_index}, got {n}. No changes saved.')
+          assert 'vpc-authentic-cover' not in s
+          assert 'vpc-exact-front-covers-20261117' not in s
+          assert s.count('class="art-hotspot art-book art-book-') == 4
+          assert len(s)>11_000_000
+          assert 'approved-scene-v7' in s and 'vpc-social-preview-v20261116' not in s
+          f.write_text(s,encoding="utf-8")
+          print("Removed exactly four floating overlays and one overlay stylesheet.")
+          print("Background scene (embedded art), wall, note, and reader untouched.")
+          print("HTML length before and after",len(original),len(s))
+          PY
+          git diff --check
+          git diff --numstat
+      - name: Commit repaired site
+        run: |
+          if ! git diff --quiet -- index.html; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add index.html
+            git commit -m 'Remove oversized cover overlays and restore intact VPC scene'
+            git push origin HEAD:main
+          fi
