@@ -1,0 +1,37 @@
+name: Inspect VPC shelf markup safely
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-inspect-shelf-safe-20261117.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print bounded book scene source excerpts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path("index.html").read_text(encoding="utf-8")
+          lines=s.splitlines()
+          print("SOURCE_SIZE",len(s),"LINES",len(lines))
+          patterns=["shelf","spine","cover","drawBook","bookData","books=","bookPos","room","wall","bookcase","front"]
+          for pat in patterns:
+              hits=[i for i,t in enumerate(lines) if pat.lower() in t.lower()]
+              print("PATTERN",pat,"COUNT",len(hits),"AT",[i+1 for i in hits[:30]])
+          keywords=["shelf","spine","drawbook","bookcase","bookcover","bookpos","bookdata","books =","books="]
+          hits=[i for i,t in enumerate(lines) if any(k in t.lower() for k in keywords) and len(t)<1500]
+          printed=set();budget=0
+          for i in hits[:110]:
+              for j in range(max(0,i-2),min(i+4,len(lines))):
+                  if j not in printed:
+                      t=lines[j][:320]
+                      print(f"{j+1}: {t}")
+                      printed.add(j);budget+=len(t)
+                  if budget>35000:break
+              if budget>35000:break
+          PY
