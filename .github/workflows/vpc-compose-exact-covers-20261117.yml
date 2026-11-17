@@ -1,0 +1,144 @@
+name: Install VPC exact-original paperback cover composites
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-compose-exact-covers-20261117.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  composite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare image compositing only
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "opencv-python-headless==4.11.0.86"
+      - name: Compose four exact supplied JPEGs into desktop and mobile scenery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          import cv2
+          import numpy as np
+
+          root = Path('.')
+          scenes = root/'assets'/'vpc-scene'
+          coversdir = root/'assets'/'book-covers'
+          original_covers = [
+              'vpc-filipino-1-front.jpg',
+              'vpc-filipino-2-front.jpg',
+              'vpc-filipino-3-front.jpg',
+              'vpc-filipino-4-front.jpg'
+          ]
+          cover_shas = [
+              'c9a19da7c596cac523a02d27a517f5c36d32ea8f',
+              '0d5e9fd8a2816850d69134e419d2062b4b2791f1',
+              'e7bacecf920aadbda68569e849cf546f85d53f81',
+              'b3fc426490447dd7b4671316037ef748feb7fee2'
+          ]
+          original_scene_shas = {
+              'desktop':'91a12dcffe7c0d6016641f5c2152dbb38be93e86',
+              'mobile':'d5348c00ebd6138fb74de0069d03e9c58a4189e9'
+          }
+          crops = [
+              (31,43,1018,1477),
+              (23,29,1064,1499),
+              (28,37,1919,2830),
+              (36,38,1913,2852)
+          ]
+          quads = {
+              'desktop': [
+                  [(81,409),(341,424),(340,846),(77,852)],
+                  [(345,422),(584,433),(584,838),(348,841)],
+                  [(592,436),(811,448),(813,824),(594,830)],
+                  [(818,448),(1030,457),(1030,814),(820,821)]
+              ],
+              'mobile': [
+                  [(20,815),(237,819),(237,1181),(22,1185)],
+                  [(241,821),(436,826),(436,1177),(243,1181)],
+                  [(442,827),(627,832),(628,1167),(445,1171)],
+                  [(635,832),(816,836),(816,1158),(636,1161)]
+              ]
+          }
+
+          def git_blob_sha(path):
+              b = Path(path).read_bytes()
+              return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+
+          # Verify byte identity with the exact original files previously supplied.
+          for fname, expected in zip(original_covers, cover_shas):
+              p = coversdir/fname
+              assert p.is_file() and git_blob_sha(p) == expected, f'Original cover mismatch: {fname}'
+          for mode, expected in original_scene_shas.items():
+              p=scenes/f'vpc-scene-{mode}-20261117.jpg'
+              assert p.is_file() and git_blob_sha(p)==expected, f'Scene source mismatch: {mode}'
+
+          page = root/'index.html'
+          s=page.read_text(encoding='utf-8')
+          assert 'vpc-approved-no-note-scene-20261117' in s, 'Missing approved scene'
+          assert 'class="art-hotspot art-note-hotspot"' not in s, 'No floating note allowed'
+          assert 'vpc-authentic-cover' not in s, 'No floating cover overlays allowed'
+          for i in range(4):
+              assert s.count(f'data-book="{i}" onclick="openReader({i})"') == 1, 'Missing book click handler'
+          if 'vpc-scene-desktop-authentic-20261117.jpg' in s:
+              assert 'vpc-scene-mobile-authentic-20261117.jpg' in s
+              print('Already installed'); raise SystemExit(0)
+
+          for mode, slots in quads.items():
+              scene_path=scenes/f'vpc-scene-{mode}-20261117.jpg'
+              scene=cv2.imread(str(scene_path),cv2.IMREAD_COLOR)
+              assert scene is not None and scene.shape[:2] == ((900,1600) if mode=='desktop' else (1600,900)), 'Scene dimensions changed'
+              h,w=scene.shape[:2]
+              for fname,crop,quad in zip(original_covers,crops,slots):
+                  original=cv2.imread(str(coversdir/fname),cv2.IMREAD_COLOR)
+                  assert original is not None, 'Unreadable cover'
+                  x0,y0,x1,y1=crop
+                  original=original[y0:y1,x0:x1]
+                  sh,sw=original.shape[:2]
+                  source=np.array([[0,0],[sw-1,0],[sw-1,sh-1],[0,sh-1]],dtype=np.float32)
+                  dest=np.array(quad,dtype=np.float32)
+                  matrix=cv2.getPerspectiveTransform(source,dest)
+                  warped=cv2.warpPerspective(original,matrix,(w,h),flags=cv2.INTER_AREA,borderMode=cv2.BORDER_CONSTANT,borderValue=(0,0,0))
+                  mask=np.zeros((h,w),dtype=np.uint8)
+                  cv2.fillConvexPoly(mask,np.int32(dest),255)
+                  mask=cv2.GaussianBlur(mask,(3,3),0.45)
+                  alpha=mask[:,:,None].astype(np.float32)/255.0
+                  scene=(warped*alpha+scene*(1-alpha)).astype(np.uint8)
+              output=scenes/f'vpc-scene-{mode}-authentic-20261117.jpg'
+              assert cv2.imwrite(str(output),scene,[cv2.IMWRITE_JPEG_QUALITY,93])
+              assert output.stat().st_size > 200000
+              print(f'Created {output} ({output.stat().st_size} bytes) using original cover scan pixels, no AI recreation')
+          for mode in ['desktop','mobile']:
+              old=f'assets/vpc-scene/vpc-scene-{mode}-20261117.jpg'
+              new=f'assets/vpc-scene/vpc-scene-{mode}-authentic-20261117.jpg'
+              assert s.count(old)==1, f'Unexpected reference count for {old}: {s.count(old)}'
+              s=s.replace(old,new,1)
+          assert 'vpc-approved-no-note-scene-20261117' in s
+          assert 'VPC Publishing | Books by Victoria P. Carlos' in s
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in s
+          assert s.count('class="art-hotspot art-book art-book-')==4
+          assert 'function openReader(i)' in s
+          assert 'function closeReader()' in s
+          page.write_text(s,encoding='utf-8')
+          print('Updated exactly two background URL references. All room, wall, notes, book readers and shopping links retained.')
+          PY
+          git diff --check
+          git status --short
+      - name: Commit exact-cover scenes without altering scene structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene/vpc-scene-desktop-authentic-20261117.jpg assets/vpc-scene/vpc-scene-mobile-authentic-20261117.jpg
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Use original VPC cover JPEGs on slim paperback bookshelf scenes'
+            git push origin HEAD:main
+          fi
