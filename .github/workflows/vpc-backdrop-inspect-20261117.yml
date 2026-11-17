@@ -1,0 +1,33 @@
+name: Inspect VPC backdrop source and cover geometry
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-backdrop-inspect-20261117.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report exact art backdrop structure and positions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text()
+          l=s.splitlines()
+          for a,b in [(1,160),(160,330),(330,370),(1370,1450)]:
+            print('SECTION',a,b)
+            for n in range(a-1,min(b,len(l))):
+              t=l[n]
+              if len(t)>1000:
+                from hashlib import sha256
+                print(n+1,'<long line>',len(t),'START',t[:450],'END',t[-180:],'sha256',sha256(t.encode()).hexdigest()[:16])
+              else:
+                print(n+1,t[:1000])
+          for k in ['art-book-1','art-book-2','art-book-3','art-book-4','office-frame','approved-scene','mobile-book','background-image','data:image','scene-bg','sceneImage']:
+            ps=[m.start() for m in re.finditer(re.escape(k),s,flags=re.I)]
+            print('FIND',k,'COUNT',len(ps),'positions',ps[:18])
+          PY
