@@ -1,0 +1,69 @@
+name: Install approved VPC note-free bookshelf scene
+on:
+  push:
+    paths:
+      - 'vpc_approved_no_note_20261117.zip'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate approved artwork and install without altering the reader
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from zipfile import ZipFile
+          import hashlib,json,subprocess,sys
+          name='vpc_approved_no_note_20261117.zip'
+          archive=Path(name)
+          if not archive.exists():
+              raise SystemExit('ABORT: approved ZIP missing; upload archive to repo root')
+          expected_files={
+              'install_vpc_scene.py',
+              'vpc-scene-desktop-20261117.jpg',
+              'vpc-scene-mobile-20261117.jpg',
+              'manifest.json',
+              'README.txt'
+          }
+          with ZipFile(archive) as z:
+              if set(z.namelist())!=expected_files:
+                  raise SystemExit('ABORT: ZIP has unexpected filenames; no changes')
+              manifest=json.loads(z.read('manifest.json'))
+              if set(manifest)!=expected_files-{'manifest.json','README.txt'}:
+                  raise SystemExit('ABORT: asset manifest entries not as expected')
+              for fname,sha in manifest.items():
+                  if hashlib.sha256(z.read(fname)).hexdigest()!=sha:
+                      raise SystemExit(f'ABORT: checksum mismatch for {fname}')
+              with TemporaryDirectory() as folder:
+                  p=Path(folder)
+                  for fname in expected_files:
+                      (p/fname).write_bytes(z.read(fname))
+                  subprocess.run([sys.executable,str(p/'install_vpc_scene.py')],check=True)
+          html=Path('index.html').read_text()
+          assert 'vpc-approved-no-note-scene-20261117' in html
+          assert 'class="art-hotspot art-note-hotspot"' not in html
+          for i in range(4):
+              assert html.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          print('Validated source and four book click handlers.')
+          PY
+          git diff --check
+          git status --short
+      - name: Commit scene assets and corrected VPC homepage
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Use approved no-note VPC desktop and mobile bookshelf scenes'
+            git push origin HEAD:main
+          else
+            echo 'Already installed; no new commit'
+          fi
