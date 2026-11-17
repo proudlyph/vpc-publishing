@@ -1,0 +1,34 @@
+name: Install exact VPC covers (after approved ZIP upload)
+on:
+  push:
+    paths:
+      - 'vpc_front_cover_patch_prepared.zip'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply-cover-corrections:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract original covers and apply isolated shelf patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f vpc_front_cover_patch_prepared.zip
+          unzip -p vpc_front_cover_patch_prepared.zip install_vpc_covers.py > /tmp/install_vpc_covers.py
+          python3 /tmp/install_vpc_covers.py
+          git diff --check
+          test "$(grep -c 'vpc-authentic-cover' index.html)" -ge 5
+          grep -q 'vpc-exact-front-covers-20261117' index.html
+          echo 'Patch validated; unchanged original scene and handlers retained.'
+      - name: Commit patched homepage and original cover files
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html assets/book-covers
+          if ! git diff --cached --quiet; then
+            git commit -m 'Replace VPC bookshelf book faces with four exact original covers'
+            git push origin HEAD:main
+          fi
