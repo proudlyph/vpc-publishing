@@ -1,0 +1,42 @@
+name: Inspect VPC shelf cover markup read only
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-inspect-shelf-20261117.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Review only scene shelf references and source structure
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path("index.html").read_text(encoding="utf-8")
+          lines=s.splitlines()
+          print("FILE",len(s),"BYTES",len(lines),"LINES")
+          patterns=[
+            r'(?i)shelf',r'(?i)books\\b',r'(?i)book\\b',r'(?i)spine',
+            r'(?i)cover',r'(?i)library',r'(?i)canvas',r'(?i)perspective',
+            r'(?i)hover',r'(?i)book1',r'(?i)book2',r'(?i)book3',r'(?i)book4'
+          ]
+          for pat in patterns:
+            hits=[i for i,x in enumerate(lines) if re.search(pat,x)]
+            print("PATTERN",pat,"COUNT",len(hits),"LINE-NUMBERS", [i+1 for i in hits[:45]])
+          # Print the matched original lines only with adjacent lines for unique program definitions.
+          target=re.compile(r'(?i)(function\\s+[a-zA-Z_$]*book|function\\s+[a-zA-Z_$]*shelf|function\\s+[a-zA-Z_$]*scene|const\\s+books|let\\s+books|id=["\\'](?:shelf|book|wall)|data-book|book-hit|book-item|\.shelf|#shelf|spine|coverImage|coverImgs|coverSrc|drawBook)')
+          matches=[i for i,x in enumerate(lines) if target.search(x)]
+          print("TARGETS",len(matches))
+          sent=set();total=0
+          for i in matches[:95]:
+            a,b=max(0,i-3),min(len(lines),i+6)
+            block="".join(f"{j+1}: {lines[j][:300]}\\n" for j in range(a,b) if j not in sent and not sent.add(j))
+            total+=len(block)
+            if total>33000:break
+            print(block)
+          PY
