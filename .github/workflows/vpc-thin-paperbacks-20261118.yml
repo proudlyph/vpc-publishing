@@ -1,0 +1,119 @@
+name: Final VPC thin paperback exact-cover deployment
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-thin-paperbacks-20261118.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image compositor
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "opencv-python-headless==4.11.0.86"
+      - name: Replace faux 3D book appearance with exact slim cover prints
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import cv2,numpy as np,hashlib
+          root=Path('.'); asset=root/'assets'/'vpc-scene'
+          cov=root/'assets'/'book-covers'
+          files=['vpc-filipino-1-front.jpg','vpc-filipino-2-front.jpg','vpc-filipino-3-front.jpg','vpc-filipino-4-front.jpg']
+          expected=['c9a19da7c596cac523a02d27a517f5c36d32ea8f','0d5e9fd8a2816850d69134e419d2062b4b2791f1','e7bacecf920aadbda68569e849cf546f85d53f81','b3fc426490447dd7b4671316037ef748feb7fee2']
+          def blobsha(b): return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          for filename,sha in zip(files,expected):
+              data=(cov/filename).read_bytes()
+              assert blobsha(data)==sha,f'Original supplied cover mismatch: {filename}'
+          bg_expected={'desktop':'91a12dcffe7c0d6016641f5c2152dbb38be93e86','mobile':'d5348c00ebd6138fb74de0069d03e9c58a4189e9'}
+          crops=[(31,43,1018,1477),(23,29,1064,1499),(28,37,1919,2830),(36,38,1913,2852)]
+          # Front-on paperback plates: no extruded spines, no hardcover thickness, no AI lettering.
+          rectangles={
+              'desktop':[
+                  [(78,408),(341,424),(340,847),(78,852)],
+                  [(345,421),(585,433),(585,840),(346,844)],
+                  [(591,436),(812,447),(813,825),(592,831)],
+                  [(818,448),(1030,457),(1030,815),(819,820)]
+              ],
+              'mobile':[
+                  [(20,815),(237,819),(237,1182),(21,1186)],
+                  [(241,820),(436,826),(437,1178),(243,1182)],
+                  [(442,827),(628,832),(628,1169),(445,1173)],
+                  [(634,831),(816,836),(816,1159),(636,1162)]
+              ]
+          }
+          for mode,quads in rectangles.items():
+              source=asset/f'vpc-scene-{mode}-20261117.jpg'
+              assert blobsha(source.read_bytes())==bg_expected[mode],f'Unexpected baseline scene: {mode}'
+              bg=cv2.imread(str(source))
+              assert bg is not None
+              h,w=bg.shape[:2]
+              assert (h,w)==((900,1600) if mode=='desktop' else (1600,900))
+              # Soft contact shadow; composited before cover so nothing modifies original lettering.
+              for quad in quads:
+                  q=np.array(quad,np.int32)
+                  shadow=np.zeros((h,w),np.uint8)
+                  cv2.fillConvexPoly(shadow,q+np.array([2,3],np.int32),180)
+                  shadow=cv2.GaussianBlur(shadow,(0,0),sigmaX=3.2,sigmaY=2.8)
+                  shade=(shadow.astype(np.float32)/255*.27)[:,:,None]
+                  bg=np.clip(bg*(1-shade),0,255).astype(np.uint8)
+              for fname,crop,quad in zip(files,crops,quads):
+                  full=cv2.imread(str(cov/fname),cv2.IMREAD_COLOR)
+                  assert full is not None
+                  x0,y0,x1,y1=crop
+                  front=full[y0:y1,x0:x1]
+                  fh,fw=front.shape[:2]
+                  src=np.float32([[0,0],[fw-1,0],[fw-1,fh-1],[0,fh-1]])
+                  dest=np.float32(quad)
+                  m=cv2.getPerspectiveTransform(src,dest)
+                  warped=cv2.warpPerspective(front,m,(w,h),flags=cv2.INTER_AREA,borderMode=cv2.BORDER_CONSTANT)
+                  mask=np.zeros((h,w),np.uint8)
+                  cv2.fillConvexPoly(mask,np.round(dest).astype(np.int32),255)
+                  # 1-pixel anti-aliasing at the contour, not a fake book spine
+                  mask=cv2.GaussianBlur(mask,(3,3),0.4)
+                  a=mask[:,:,None].astype(np.float32)/255.
+                  bg=np.clip(warped*a+bg*(1-a),0,255).astype(np.uint8)
+              dst=asset/f'vpc-scene-{mode}-slim-original-20261118.jpg'
+              ok=cv2.imwrite(str(dst),bg,[cv2.IMWRITE_JPEG_QUALITY,95])
+              assert ok and 200000 < dst.stat().st_size < 7000000
+              print(f'Slim-paperback {mode}: {dst.stat().st_size} bytes, source covers independently SHA verified')
+          page=Path('index.html'); s=page.read_text()
+          assert 'vpc-approved-no-note-scene-20261117' in s
+          assert 'class="art-hotspot art-note-hotspot"' not in s
+          assert 'vpc-authentic-cover' not in s
+          assert s.count('class="art-hotspot art-book art-book-')==4
+          assert 'function openReader(i)' in s and 'function closeReader()' in s
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in s
+          for i in range(4):
+              assert s.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          for mode in ('desktop','mobile'):
+              old=f'assets/vpc-scene/vpc-scene-{mode}-authentic-20261117.jpg'
+              new=f'assets/vpc-scene/vpc-scene-{mode}-slim-original-20261118.jpg'
+              if new in s:
+                  print(mode,'already updated')
+              else:
+                  assert s.count(old)==1,f'Unexpected current scene reference for {mode}'
+                  s=s.replace(old,new,1)
+          assert 'vpc-scene-desktop-slim-original-20261118.jpg' in s
+          assert 'vpc-scene-mobile-slim-original-20261118.jpg' in s
+          page.write_text(s)
+          print('Scene URL swaps validated; note-free wall, book reader, and purchase links retained.')
+          PY
+          git diff --check
+          git diff --stat
+      - name: Commit updated backgrounds
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene/vpc-scene-desktop-slim-original-20261118.jpg assets/vpc-scene/vpc-scene-mobile-slim-original-20261118.jpg
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Deploy exact original VPC covers with thin front-only paperback finish'
+            git push origin HEAD:main
+          fi
