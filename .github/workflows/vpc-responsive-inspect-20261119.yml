@@ -1,0 +1,35 @@
+name: Inspect VPC desktop/mobile layout rules
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-responsive-inspect-20261119.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print targeted CSS and HTML only
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          lines=s.splitlines()
+          print('HTML LENGTH',len(s),'LINES',len(lines))
+          patterns=['background-size:', 'approved-scene', '.art-book', 'art-book-1', 'art-book-2', 'art-book-3', 'art-book-4', '#office', '.office-frame', '@media','mobile', 'art-hotspot', 'background-image:']
+          targets=[i for i,line in enumerate(lines) if len(line)<1800 and any(k in line for k in patterns)]
+          print('MATCH COUNT',len(targets))
+          selected=set()
+          for i in targets[:160]:
+            for j in range(max(0,i-2),min(len(lines),i+3)):selected.add(j)
+          total=0
+          for j in sorted(selected):
+            t=lines[j]
+            if len(t)>1500:t=t[:200]+'[LONG DATA OMITTED]'
+            total+=len(t)
+            if total>44000:break
+            print(f'{j+1}: {t}')
+          PY
