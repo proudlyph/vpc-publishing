@@ -1,0 +1,23 @@
+name: Audit final VPC stylesheet precedence
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-last-css-audit-20261119.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print relevant later styles and four hotspot node positions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          lines=Path('index.html').read_text().splitlines()
+          for n in range(1150,min(len(lines),1610)):
+              s=lines[n]
+              if len(s)<1800:print(f'{n+1}: {s[:400]}')
+              else:print(f'{n+1}: [EMBEDDED DATA {len(s)} characters]')
+          PY
