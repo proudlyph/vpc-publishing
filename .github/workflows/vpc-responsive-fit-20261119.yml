@@ -1,0 +1,101 @@
+name: Fix VPC responsive scene without stretching books
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-responsive-fit-20261119.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fit scene to its actual source aspect ratio and validate 4 tap targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          style_id="vpc-final-proportional-responsive-20261119"
+          assert style_id not in s, "Fix already applied"
+          assert s.count('</head>')==1
+          assert s.count('background-size:100% 100%!important;')>=2
+          assert s.count('class="art-hotspot art-book art-book-')==4
+          assert 'vpc-scene-mobile-no-blur-20261119.webp' in s
+          assert 'vpc-scene-desktop-clean-upper-edges-20261118.webp' in s
+          assert 'function openReader(i)' in s and 'function closeReader()' in s
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in s
+          for i in range(4):
+              assert s.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          assert 'class="art-hotspot art-note-hotspot"' not in s
+          assert 'vpc-authentic-cover' not in s
+
+          # Stage uses the source photo aspect ratio. Letterboxing is intentional
+          # on unusually narrow browser windows: unlike stretch/cover it preserves
+          # the four book widths and maps click hotspots to the exact same scene.
+          fix = """
+          <style id="vpc-final-proportional-responsive-20261119">
+            /* 1600 x 900 desktop image; preserve real image proportions. */
+            #office .office-frame.approved-scene {
+              position:absolute!important;
+              inset:auto!important;
+              left:50%!important;
+              top:50%!important;
+              width:min(100vw, calc(100dvh * 16 / 9))!important;
+              height:min(100dvh, calc(100vw * 9 / 16))!important;
+              aspect-ratio:16 / 9!important;
+              transform:translate(-50%, -50%)!important;
+              margin:0!important;
+              background-size:100% 100%!important;
+              background-position:center!important;
+              background-repeat:no-repeat!important;
+              overflow:hidden!important;
+            }
+            @media (max-width:700px) {
+              /* 900 x 1600 portrait image; never distort it to a tall phone. */
+              #office .office-frame.approved-scene {
+                width:min(100vw, calc(100dvh * 9 / 16))!important;
+                height:min(100dvh, calc(100vw * 16 / 9))!important;
+                aspect-ratio:9 / 16!important;
+              }
+            }
+            /* The empty surround is real wood-toned negative space, never stretched art. */
+            #office:not(.reader-open) {
+              background:radial-gradient(ellipse at 50% 40%,#51311e,#180e09 85%)!important;
+            }
+          </style>
+          """
+          s=s.replace('</head>',fix+'</head>',1)
+          assert s.count(style_id)==1
+          assert s.count('class="art-hotspot art-book art-book-')==4
+
+          # Geometry: stage is an exact picture-ratio rectangle and retains each
+          # original fractional hotspot position without translation or scaling skew.
+          for viewportW,viewportH in [(1920,1080),(1366,768),(944,864),(768,1024),(390,844),(375,667),(430,932),(320,568)]:
+              ratio=9/16 if viewportW<=700 else 16/9
+              width=min(viewportW,viewportH*ratio)
+              height=min(viewportH,viewportW/ratio)
+              assert abs(width/height-ratio)<1e-8
+              assert width<=viewportW+1e-8 and height<=viewportH+1e-8
+              assert width>0 and height>0
+              print(f'OK viewport {viewportW}x{viewportH}: scene {width:.1f}x{height:.1f}, letterbox preserves hotspot coordinates')
+          p.write_text(s,encoding='utf-8')
+          print('No assets, original cover pixels, links, reader JS or existing hotspot coordinates were changed.')
+          PY
+          git diff --check
+          git diff --stat
+      - name: Commit responsive layout fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Preserve VPC scene aspect ratios and book click alignment at all viewports'
+            git push origin HEAD:main
+          fi
