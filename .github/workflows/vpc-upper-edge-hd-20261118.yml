@@ -1,0 +1,123 @@
+name: Repair only VPC upper cover edges at double resolution
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-upper-edge-hd-20261118.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  edge-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deterministic image processing
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "opencv-python-headless==4.11.0.86"
+      - name: Build clean HD paperback contours from the original four files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import cv2
+          import numpy as np
+
+          base=Path('assets/vpc-scene')
+          originals=Path('assets/book-covers')
+          names=['vpc-filipino-1-front.jpg','vpc-filipino-2-front.jpg','vpc-filipino-3-front.jpg','vpc-filipino-4-front.jpg']
+          expected=[
+             'c9a19da7c596cac523a02d27a517f5c36d32ea8f',
+             '0d5e9fd8a2816850d69134e419d2062b4b2791f1',
+             'e7bacecf920aadbda68569e849cf546f85d53f81',
+             'b3fc426490447dd7b4671316037ef748feb7fee2'
+          ]
+          original_baselines={
+             'desktop':'91a12dcffe7c0d6016641f5c2152dbb38be93e86',
+             'mobile':'d5348c00ebd6138fb74de0069d03e9c58a4189e9'
+          }
+          def gitsha(path):
+             b=path.read_bytes()
+             return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          for name,sha in zip(names,expected):
+             p=originals/name
+             assert p.is_file() and gitsha(p)==sha, 'Original cover changed: '+name
+
+          # Cut inside the photographic sleeve border, retaining only the actual printed cover.
+          crops=[(34,62,1014,1470),(27,51,1061,1495),(29,61,1915,2824),(41,64,1905,2846)]
+          quads={
+             'desktop':[
+                [(78,406),(340,419),(340,847),(78,852)],
+                [(346,419),(584,431),(584,840),(346,844)],
+                [(592,434),(813,447),(813,825),(592,831)],
+                [(819,445),(1030,457),(1030,815),(819,820)]
+             ],
+             'mobile':[
+                [(20,811),(237,816),(237,1182),(21,1186)],
+                [(241,817),(436,824),(437,1178),(243,1182)],
+                [(442,824),(628,830),(628,1169),(445,1173)],
+                [(634,828),(816,834),(816,1159),(636,1162)]
+             ]
+          }
+          for mode in ('desktop','mobile'):
+             original_bg=base/f'vpc-scene-{mode}-20261117.jpg'
+             assert original_bg.is_file() and gitsha(original_bg)==original_baselines[mode], 'Baseline changed'
+             bg=cv2.imread(str(original_bg),cv2.IMREAD_COLOR)
+             h,w=bg.shape[:2]
+             assert (h,w)==((900,1600) if mode=='desktop' else (1600,900))
+             scale=2
+             result=cv2.resize(bg,(scale*w,scale*h),interpolation=cv2.INTER_CUBIC)
+             for name,crop,quad in zip(names,crops,quads[mode]):
+                full=cv2.imread(str(originals/name),cv2.IMREAD_COLOR)
+                assert full is not None
+                x0,y0,x1,y1=crop
+                cover=full[y0:y1,x0:x1]
+                ch,cw=cover.shape[:2]
+                source=np.float32([[0,0],[cw-1,0],[cw-1,ch-1],[0,ch-1]])
+                dest=np.float32(quad)*scale
+                transform=cv2.getPerspectiveTransform(source,dest)
+                warped=cv2.warpPerspective(cover,transform,(scale*w,scale*h),
+                     flags=cv2.INTER_CUBIC,borderMode=cv2.BORDER_REPLICATE)
+                mask=np.zeros((scale*h,scale*w),np.uint8)
+                cv2.fillConvexPoly(mask,np.round(dest).astype(np.int32),255,lineType=cv2.LINE_AA)
+                alpha=mask[:,:,None].astype(np.float32)/255.
+                result=np.clip(warped*alpha+result*(1-alpha),0,255).astype(np.uint8)
+             filename=base/f'vpc-scene-{mode}-clean-upper-edges-20261118.webp'
+             assert cv2.imwrite(str(filename),result,[cv2.IMWRITE_WEBP_QUALITY,96])
+             assert 400000<filename.stat().st_size<4500000, 'Unexpected compressed image size'
+             print(f'HD {mode}: {result.shape[1]}x{result.shape[0]}, {filename.stat().st_size} bytes, four exact source JPEGs')
+
+          page=Path('index.html')
+          html=page.read_text(encoding='utf-8')
+          assert 'vpc-approved-no-note-scene-20261117' in html
+          assert 'class="art-hotspot art-note-hotspot"' not in html
+          assert 'vpc-authentic-cover' not in html
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          for i in range(4):
+             assert html.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          assert 'function openReader(i)' in html and 'function closeReader()' in html
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in html
+          for mode in ('desktop','mobile'):
+             previous=f'assets/vpc-scene/vpc-scene-{mode}-slim-original-20261118.jpg'
+             updated=f'assets/vpc-scene/vpc-scene-{mode}-clean-upper-edges-20261118.webp'
+             assert html.count(previous)==1, 'Unexpected HTML source image reference for '+mode
+             html=html.replace(previous,updated,1)
+          page.write_text(html,encoding='utf-8')
+          print('Changed only two image URLs; text, wall, scene positions, navigation, readers and links unchanged.')
+          PY
+          git diff --check
+          git status --short
+      - name: Commit edge-cleaned images and preserve scene semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp assets/vpc-scene/vpc-scene-mobile-clean-upper-edges-20261118.webp
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Sharpen upper paperback edges using original scans at high resolution'
+            git push origin HEAD:main
+          fi
