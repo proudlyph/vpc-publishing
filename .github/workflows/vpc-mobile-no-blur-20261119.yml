@@ -1,0 +1,130 @@
+name: Fix VPC mobile blur without changing four original book covers
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-mobile-no-blur-20261119.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fix-mobile-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare deterministic image processor
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "opencv-python-headless==4.11.0.86"
+      - name: Replace only blurry top and bottom with sharp wood framing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          import cv2
+          import numpy as np
+
+          root=Path('assets/vpc-scene')
+          old=root/'vpc-scene-mobile-clean-upper-edges-20261118.webp'
+          new=root/'vpc-scene-mobile-no-blur-20261119.webp'
+          expected='fb9f7569f0982c3805c57e81b1ce89d3d4f2d0bd'
+          def git_blob(path):
+              b=path.read_bytes()
+              return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          assert old.is_file() and git_blob(old)==expected, 'Unexpected mobile image. Refusing to modify.'
+          img=cv2.imread(str(old),cv2.IMREAD_COLOR)
+          assert img is not None and img.shape[:2]==(3200,1800), 'Unexpected high-resolution mobile dimensions'
+          W,H=900,1600
+          sample=cv2.resize(img,(W,H),interpolation=cv2.INTER_AREA)
+          output=sample.copy()
+          rng=np.random.default_rng(10)
+
+          # Replace the blurred upper 225px with a seamless designed walnut soffit.
+          # This only covers background outside the original sharp books and wall.
+          top_h=225
+          yy,xx=np.mgrid[0:top_h,0:W]
+          r=rng.normal(0,1,(W,)).astype(np.float32)
+          r=cv2.GaussianBlur(r[None,:],(0,0),sigmaX=2.0)[0]
+          rl=cv2.GaussianBlur(r[None,:],(0,0),sigmaX=13.0)[0]
+          wave=(xx+2*np.sin(yy/21.+xx/85.)).astype(int)%W
+          texture=10*r[wave]+10*rl[wave]+rng.normal(0,.9,(top_h,W))
+          light=(9*np.sin(np.pi*xx/W)+5*np.sin(np.pi*yy/top_h))
+          base=np.array([14.,45.,82.])
+          wood=np.clip(base+texture[:,:,None]*np.array([.65,.8,1])+light[:,:,None],0,255).astype(np.uint8)
+          output[:top_h]=wood
+          cv2.line(output,(0,203),(W-1,203),(32,82,126),2,cv2.LINE_AA)
+          cv2.line(output,(0,209),(W-1,209),(6,25,49),4,cv2.LINE_AA)
+          for y in range(208,225):
+              a=(y-208)/17.
+              output[y]=np.clip(output[y].astype(float)*(0.93-0.32*a),0,255).astype(np.uint8)
+          cv2.line(output,(0,224),(W-1,224),(8,16,30),3,cv2.LINE_AA)
+
+          # Replace blurred lower 410px with cabinet paneling and real photo wood grain.
+          h=410
+          yy,xx=np.mgrid[0:h,0:W]
+          f=rng.normal(0,1,(W,)).astype(np.float32)
+          f=cv2.GaussianBlur(f[None,:],(0,0),sigmaX=3.1)[0]
+          wide=cv2.GaussianBlur(f[None,:],(0,0),sigmaX=26)[0]
+          warped=(xx+3.5*np.sin(yy/36+xx/80)+2*np.sin(yy/111+xx/25)).astype(int)%W
+          v=14*f[warped]+13*wide[warped]+1.8*rng.normal(0,1,(h,W))
+          v+=2.1*np.sin(yy*.085+2*np.sin(xx*.003))+8*np.sin((xx/W)*np.pi)
+          cabinet=np.clip(np.array([18.,52.,88.])+v[:,:,None]*np.array([.6,.8,1.]),0,255).astype(np.uint8)
+          output[1190:]=cabinet
+
+          # Use a wood-only shelf segment for the lower shelf front.
+          photo_wood=sample[756:802,0:250].copy()
+          assert photo_wood.shape[:2]==(46,250)
+          shelf_wood=cv2.resize(photo_wood,(W,40),interpolation=cv2.INTER_CUBIC)
+          for y in range(1190,1228):
+              output[y]=np.clip(shelf_wood[y-1190]*(1-(y-1190)/85),0,255).astype(np.uint8)
+          for y in range(1228,1256):
+              a=(1256-y)/28*.48
+              output[y]=np.clip(output[y].astype(float)*(1-a),0,255).astype(np.uint8)
+          for x in (42,846):
+              cv2.line(output,(x,1262),(x,1599),(7,23,42),5,cv2.LINE_AA)
+              cv2.line(output,(x+7,1262),(x+7,1599),(33,76,112),2,cv2.LINE_AA)
+          cv2.line(output,(45,1277),(843,1277),(12,36,68),6,cv2.LINE_AA)
+          cv2.line(output,(50,1285),(837,1285),(40,80,130),2,cv2.LINE_AA)
+
+          # Keep the exact existing high-resolution rendered room and 4 books untouched,
+          # including all pixels used by their clickable areas.
+          hd=cv2.resize(output,(1800,3200),interpolation=cv2.INTER_CUBIC)
+          hd[450:2380]=img[450:2380]
+          assert np.array_equal(hd[450:2380],img[450:2380])
+          assert cv2.imwrite(str(new),hd,[cv2.IMWRITE_WEBP_QUALITY,94])
+          assert new.stat().st_size>300000 and new.stat().st_size<5000000
+          print('New mobile image:',new,'bytes:',new.stat().st_size)
+
+          html_path=Path('index.html')
+          html=html_path.read_text(encoding='utf-8')
+          before='assets/vpc-scene/vpc-scene-mobile-clean-upper-edges-20261118.webp'
+          after='assets/vpc-scene/vpc-scene-mobile-no-blur-20261119.webp'
+          assert html.count(before)==1, 'Unexpected source reference'
+          assert 'vpc-approved-no-note-scene-20261117' in html
+          assert 'class="art-hotspot art-note-hotspot"' not in html
+          assert 'vpc-authentic-cover' not in html
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          for i in range(4):
+              assert html.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          assert 'function openReader(i)' in html and 'function closeReader()' in html
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in html
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in html
+          html=html.replace(before,after,1)
+          html_path.write_text(html,encoding='utf-8')
+          print('Updated only mobile image reference. Desktop scene, tap zones, wall, page reader and links unchanged.')
+          PY
+          git diff --check
+          git status --short
+      - name: Commit narrow mobile-only fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene/vpc-scene-mobile-no-blur-20261119.webp
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Remove blurred mobile scene extensions; preserve original book artwork'
+            git push origin HEAD:main
+          fi
