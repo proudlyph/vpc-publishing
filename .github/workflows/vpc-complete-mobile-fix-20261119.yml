@@ -1,0 +1,256 @@
+name: VPC complete mobile composition and wall-logo regression fix
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-complete-mobile-fix-20261119.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  test-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image and browser test dependencies
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "Pillow>=10,<12" "playwright>=1.55,<1.60"
+      - name: Compose one continuous portrait bookstore from original photographs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import numpy as np
+          from PIL import Image,ImageDraw
+
+          folder=Path('assets/vpc-scene')
+          mobile=folder/'vpc-scene-mobile-clean-upper-edges-20261118.webp'
+          desktop=folder/'vpc-scene-desktop-20261117.jpg'
+          new=folder/'vpc-scene-mobile-portrait-final-20261119.webp'
+          def gitsha(path):
+              b=path.read_bytes()
+              return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          assert gitsha(mobile)=='fb9f7569f0982c3805c57e81b1ce89d3d4f2d0bd'
+          assert gitsha(desktop)=='91a12dcffe7c0d6016641f5c2152dbb38be93e86'
+          high=Image.open(mobile).convert('RGB')
+          assert high.size==(1800,3200)
+          photo=Image.open(desktop).convert('RGB')
+          assert photo.size==(1600,900)
+          orig=high.resize((900,1600),Image.Resampling.LANCZOS)
+          scene=orig.copy()
+
+          # Natural original-source photo above the existing sharp scene.
+          top=photo.crop((0,0,1600,210)).resize((900,230),Image.Resampling.LANCZOS)
+          scene.paste(top,(0,0))
+
+          # A real walnut ceiling/shelf beam covers the join; no blurred or
+          # stretched brown fill, and no doubled ghosted ceiling.
+          wood=photo.crop((0,310,820,352)).resize((900,33),Image.Resampling.LANCZOS)
+          scene.paste(wood,(0,220))
+          dr=ImageDraw.Draw(scene)
+          dr.line([(0,220),(899,220)],fill=(147,79,36),width=2)
+          dr.line([(0,250),(899,250)],fill=(33,17,9),width=3)
+
+          # Take only photographic interior/floor from behind the foreground
+          # books, never a second book cover. This replaces oversized faux panels.
+          floor=photo.crop((1080,593,1600,900)).resize((900,408),Image.Resampling.LANCZOS)
+          scene.paste(floor,(0,1192))
+          lip=photo.crop((85,827,1194,865)).resize((900,34),Image.Resampling.LANCZOS)
+          scene.paste(lip,(0,1180))
+          dr=ImageDraw.Draw(scene)
+          dr.line([(0,1212),(899,1212)],fill=(38,20,11),width=4)
+
+          # Critically: preserve every pixel of the book covers and VPC wall
+          # in the original source center, without ANY AI re-rendering.
+          a=np.array(scene)
+          b=np.array(orig)
+          a[253:1180,:,:]=b[253:1180,:,:]
+          assert np.array_equal(a[253:1180],b[253:1180])
+          final=Image.fromarray(a,'RGB').resize((1800,3200),Image.Resampling.LANCZOS)
+          final.save(new,'WEBP',quality=94,method=6)
+          assert 300000<new.stat().st_size<5000000
+          print('Final mobile:',new,new.stat().st_size,'bytes; 1800x3200; exact cover/wall source center protected')
+
+          # Desktop photo itself is never changed.
+          assert (folder/'vpc-scene-desktop-clean-upper-edges-20261118.webp').is_file()
+          PY
+      - name: Consolidate logo and responsive CSS without changing reader code
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re, hashlib
+          p=Path('index.html')
+          html=p.read_text(encoding='utf-8')
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          assert html.count('class="vpc-kit-wall-logo"')==1
+          assert html.count('function openReader(i)')==1
+          assert 'function closeReader()' in html
+          assert 'vpc-final-proportional-responsive-20261119' in html
+          assert 'vpc-original-logo-discreet-20261119' in html
+          assert 'vpc-wall-logo-plaque-correction-20261119' in html
+          assert 'vpc-kit-original-logo-only-20261119' in html
+          assert 'assets/vpc-scene/vpc-scene-mobile-no-blur-20261119.webp' in html
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in html
+          assert html.count('class="art-hotspot art-note-hotspot"')==0
+          assert 'vpc-authentic-cover' not in html
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in html
+          for n in range(4):
+              assert html.count(f'data-book="{n}" onclick="openReader({n})"')==1
+          logo=Path('assets/vpc-kit-original-logo.png')
+          b=logo.read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()=='c7b7f5f007bbae4e75bd472f419295f15f39b854'
+          # Remove superseded logo visual rules, avoiding yet another pile of
+          # contradictory overlapping patches. Keep the image tag and file.
+          ids=['vpc-kit-original-logo-only-20261119','vpc-wall-logo-plaque-correction-20261119','vpc-original-logo-discreet-20261119']
+          for id in ids:
+              pat=re.compile(r'<style id="'+re.escape(id)+r'">[\s\S]*?</style>',re.I)
+              html,count=pat.subn('',html)
+              assert count==1, 'Unexpected logo stylesheet count: '+id
+          html=html.replace('assets/vpc-scene/vpc-scene-mobile-no-blur-20261119.webp','assets/vpc-scene/vpc-scene-mobile-portrait-final-20261119.webp',1)
+
+          # The established desktop photograph and hotspot mapping remain intact.
+          # Mobile uses 100% width; no black gutters or ratio-box letterboxing.
+          css="""
+          <style id="vpc-clean-mobile-and-original-logo-20261119">
+            #office .office-frame.approved-scene > img.vpc-kit-wall-logo {
+              position:absolute!important;
+              display:block!important;
+              z-index:5!important;
+              pointer-events:none!important;
+              user-select:none!important;
+              -webkit-user-drag:none!important;
+              left:85%!important;
+              top:42%!important;
+              width:8.0%!important;
+              height:auto!important;
+              max-width:none!important;
+              aspect-ratio:1 / 1!important;
+              transform:translateX(-50%)!important;
+              object-fit:contain!important;
+              padding:0!important;
+              border:0!important;
+              border-radius:0!important;
+              background:transparent!important;
+              box-shadow:none!important;
+              filter:none!important;
+              opacity:.93!important;
+              mix-blend-mode:multiply!important;
+              image-rendering:auto!important;
+            }
+            @media(max-width:700px) {
+              #office {
+                position:fixed!important;
+                inset:0!important;
+                overflow:hidden!important;
+                background:#3b2414!important;
+              }
+              #office .office-frame.approved-scene {
+                position:absolute!important;
+                inset:0!important;
+                top:0!important;
+                left:0!important;
+                width:100vw!important;
+                height:100dvh!important;
+                max-width:none!important;
+                max-height:none!important;
+                aspect-ratio:auto!important;
+                transform:none!important;
+                background-position:center center!important;
+                background-size:100% 100%!important;
+                background-repeat:no-repeat!important;
+                border:0!important;
+                border-radius:0!important;
+              }
+              #office .office-frame.approved-scene > img.vpc-kit-wall-logo {
+                left:72.5%!important;
+                top:36%!important;
+                width:14%!important;
+                opacity:.96!important;
+              }
+            }
+          </style>
+          """
+          assert html.count('</head>')==1
+          html=html.replace('</head>',css+'</head>',1)
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          assert html.count('class="vpc-kit-wall-logo"')==1
+          p.write_text(html,encoding='utf-8')
+          print('Removed three contradictory logo styles; one original logo, no plaque; mobile full width; readers preserved')
+          PY
+      - name: Browser and asset regression checks before any publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          from html.parser import HTMLParser
+          from urllib.parse import unquote
+          html=Path('index.html').read_text()
+          assert 'vpc-clean-mobile-and-original-logo-20261119' in html
+          assert html.count('<style id="vpc-clean-mobile-and-original-logo-20261119">')==1
+          assert html.count('class="vpc-kit-wall-logo"')==1
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          a=Image.open('assets/vpc-scene/vpc-scene-mobile-portrait-final-20261119.webp')
+          assert a.size==(1800,3200)
+          print('Asset dimensions and all 4 reader buttons verified')
+          PY
+          python - <<'PY'
+          import importlib.util, subprocess
+          from pathlib import Path
+          if not importlib.util.find_spec('playwright'):
+              raise SystemExit('Playwright not installed')
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              browser=p.chromium.launch(headless=True, executable_path='/usr/bin/google-chrome',args=['--no-sandbox'])
+              for width,height in [(390,844),(375,667),(430,932),(1440,900),(944,864)]:
+                  page=browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1,is_mobile=width<=700,has_touch=width<=700)
+                  failures=[]
+                  page.on('pageerror',lambda e:failures.append(str(e)))
+                  page.goto(Path('index.html').resolve().as_uri(),wait_until='load')
+                  page.locator('img.vpc-kit-wall-logo').evaluate('(el)=>el.decode()')
+                  assert page.locator('.art-book').count()==4
+                  assert page.locator('.vpc-kit-wall-logo').count()==1
+                  met=page.evaluate("""() => {
+                    const o=document.querySelector('#office');
+                    const frame=document.querySelector('.office-frame.approved-scene');
+                    const logo=document.querySelector('.vpc-kit-wall-logo');
+                    const r=frame.getBoundingClientRect();
+                    const l=logo.getBoundingClientRect();
+                    const hotspots=[...document.querySelectorAll('.art-book')].map(b=>{
+                      const x=b.getBoundingClientRect();return [x.left,x.top,x.width,x.height]
+                    });
+                    return {viewport:[innerWidth,innerHeight],frame:[r.left,r.top,r.width,r.height],logo:[l.left,l.top,l.width,l.height],hotspots,loaded:logo.naturalWidth,background:getComputedStyle(frame).backgroundImage}
+                  }""")
+                  assert met['loaded']>0
+                  assert all(b[2]>20 and b[3]>20 for b in met['hotspots'])
+                  assert all(b[0]>=-3 and b[0]+b[2]<=width+5 for b in met['hotspots']),'Book hit area clipped'
+                  if width<=700:
+                      assert abs(met['frame'][2]-width)<2,'Black side gutters'
+                      assert abs(met['frame'][3]-height)<2,'Incorrect mobile scene height'
+                      assert 'vpc-scene-mobile-portrait-final-20261119.webp' in met['background']
+                  page.locator('.art-book-2').click(force=True)
+                  assert page.locator('#reader').evaluate('(r)=>r.classList.contains("open")'), 'Reader failed opening'
+                  assert not failures, 'Page Javascript error: '+repr(failures)
+                  page.screenshot(path=f'/tmp/vpc-{width}x{height}.png',full_page=True)
+                  print('PASS',met['viewport'],'wall logo visible, background correct, reader opens; no browser errors')
+                  page.close()
+              browser.close()
+          PY
+      - name: Publish only after passing checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add index.html assets/vpc-scene/vpc-scene-mobile-portrait-final-20261119.webp
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Finish VPC mobile bookstore and original wall-logo layout with browser tests'
+            git push origin HEAD:main
+          fi
