@@ -1437,10 +1437,43 @@ button{-webkit-tap-highlight-color:transparent}
     background:radial-gradient(ellipse at 50% 40%,#51311e,#180e09 85%)!important;
   }
 </style>
+
+<style id="vpc-kit-original-logo-only-20261119">
+  /* Exact supplied black-and-white logo; only its placement is new.
+     Mix-blend removes the white scan background visually without rewriting the logo. */
+  #office .approved-scene .vpc-kit-wall-logo{
+    position:absolute!important;
+    display:block!important;
+    z-index:5!important;
+    pointer-events:none!important;
+    user-select:none!important;
+    -webkit-user-drag:none!important;
+    left:85%!important;
+    top:44.5%!important;
+    width:9%!important;
+    height:auto!important;
+    aspect-ratio:1/1!important;
+    max-width:none!important;
+    transform:translateX(-50%)!important;
+    object-fit:contain!important;
+    mix-blend-mode:multiply!important;
+    opacity:.90!important;
+    filter:none!important;
+  }
+  @media(max-width:700px){
+    #office .approved-scene .vpc-kit-wall-logo{
+      left:72.5%!important;
+      top:36%!important;
+      width:14%!important;
+      opacity:.92!important;
+    }
+  }
+</style>
 </head>
 <body>
 <main id="office" aria-label="VPC Publishing office">
   <div class="office-frame approved-scene">
+    <img class="vpc-kit-wall-logo" src="assets/vpc-kit-original-logo.png" alt="I’d Like to Speak Filipino handshake emblem" width="220" height="220" decoding="async" draggable="false">
 <button class="art-hotspot art-book art-book-1" aria-label="Open I’d Like to Speak Filipino 1" data-book="0" onclick="openReader(0)"></button>
     <button class="art-hotspot art-book art-book-2" aria-label="Open I’d Like to Speak Filipino 2" data-book="1" onclick="openReader(1)"></button>
     <button class="art-hotspot art-book art-book-3" aria-label="Open I’d Like to Speak Filipino 3" data-book="2" onclick="openReader(2)"></button>
