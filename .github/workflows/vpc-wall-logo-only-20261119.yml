@@ -1,0 +1,100 @@
+name: Place Tito Kit original handshake logo under VPC Publishing wall name
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-wall-logo-only-20261119.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  logo-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preserve existing scenes; add exact logo below company name
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          scene=Path('assets/vpc-scene')
+          expected={
+            'vpc-scene-desktop-clean-upper-edges-20261118.webp':'b0e7068fa5c21e048281ee5a6eb148f562970fea',
+            'vpc-scene-mobile-no-blur-20261119.webp':'51ce94df5e3a5e6be8531c7ba5b61e811d01ac14'
+          }
+          def blobsha(p):
+            b=p.read_bytes()
+            return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          for name,sha in expected.items():
+            assert blobsha(scene/name)==sha, f'Unexpected scene asset: {name}'
+          logo=Path('assets/vpc-kit-original-logo.png')
+          assert logo.is_file() and blobsha(logo)=='c7b7f5f007bbae4e75bd472f419295f15f39b854', 'Not original supplied logo asset'
+          p=Path('index.html')
+          html=p.read_text(encoding='utf-8')
+          assert 'vpc-kit-wall-logo' not in html, 'Logo placement already installed'
+          assert html.count('<div class="office-frame approved-scene">')==1
+          assert html.count('</head>')==1
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          assert 'vpc-final-proportional-responsive-20261119' in html
+          assert 'vpc-approved-no-note-scene-20261117' in html
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in html
+          assert 'assets/vpc-scene/vpc-scene-mobile-no-blur-20261119.webp' in html
+          for i in range(4):
+            assert html.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          assert 'function openReader(i)' in html and 'function closeReader()' in html
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in html
+          css='''
+          <style id="vpc-kit-original-logo-only-20261119">
+            /* Exact supplied black-and-white logo; only its placement is new.
+               Mix-blend removes the white scan background visually without rewriting the logo. */
+            #office .approved-scene .vpc-kit-wall-logo{
+              position:absolute!important;
+              display:block!important;
+              z-index:5!important;
+              pointer-events:none!important;
+              user-select:none!important;
+              -webkit-user-drag:none!important;
+              left:85%!important;
+              top:44.5%!important;
+              width:9%!important;
+              height:auto!important;
+              aspect-ratio:1/1!important;
+              max-width:none!important;
+              transform:translateX(-50%)!important;
+              object-fit:contain!important;
+              mix-blend-mode:multiply!important;
+              opacity:.90!important;
+              filter:none!important;
+            }
+            @media(max-width:700px){
+              #office .approved-scene .vpc-kit-wall-logo{
+                left:72.5%!important;
+                top:36%!important;
+                width:14%!important;
+                opacity:.92!important;
+              }
+            }
+          </style>
+          '''
+          html=html.replace('</head>',css+'</head>',1)
+          html=html.replace('<div class="office-frame approved-scene">','<div class="office-frame approved-scene">\n    <img class="vpc-kit-wall-logo" src="assets/vpc-kit-original-logo.png" alt="I’d Like to Speak Filipino handshake emblem" width="220" height="220" decoding="async" draggable="false">',1)
+          assert html.count('class="vpc-kit-wall-logo"')==1
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          p.write_text(html,encoding='utf-8')
+          print('Original logo installed below VPC PUBLISHING on desktop and mobile.')
+          print('Existing desktop/mobile background images and all book-click positions untouched.')
+          PY
+          git diff --check
+          git diff --stat
+      - name: Commit only HTML logo placement
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Mount original Tito Kit logo below VPC Publishing name without changing scene artwork'
+            git push origin HEAD:main
+          fi
