@@ -1,0 +1,128 @@
+name: Clear blurred books behind VPC wall logo without touching foreground
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-clear-wall-behind-logo-20261120.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deterministic imaging and browser test tools
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "opencv-python-headless==4.11.0.86" "playwright>=1.55,<1.60"
+      - name: Remove only the two out-of-focus book stacks in mobile wall photo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, cv2, numpy as np
+          base=Path('assets/vpc-scene')
+          src=base/'vpc-scene-mobile-portrait-final-20261119.webp'
+          dst=base/'vpc-scene-mobile-clear-logo-wall-20261120.webp'
+          def gitsha(p):
+            b=p.read_bytes()
+            return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          assert gitsha(src)=='9b9413b457985674a1751de49526bd853a486d35', 'Mobile source changed; cancel rather than overwrite new work'
+          im=cv2.imread(str(src),cv2.IMREAD_COLOR)
+          assert im is not None and im.shape[:2]==(3200,1800),'Unexpected source image size'
+          out=im.copy()
+          # Two localized masks, NOT the four real book-cover foreground images.
+          # At 1800x3200, furniture-top stacks are 965..1115 and 1250..1500 at y~1300..1440.
+          rectangles=[(943,1124,1340,1442),(1250,1500,1303,1440)]
+          change_mask=np.zeros(im.shape[:2],np.uint8)
+          for x0,x1,y0,y1 in rectangles:
+            w=x1-x0
+            h=y1-y0
+            # Preserve the original wall's existing light and color gradient.
+            pristine=im[y0-76:y0-20,x0:x1].astype(np.float32)
+            source_strip=pristine.mean(axis=0)
+            fill=np.repeat(source_strip[None,:,:],h,axis=0)
+            left=im[y0:y1,x0-40:x0-25].mean(axis=1).astype(np.float32)
+            right=im[y0:y1,x1+25:x1+40].mean(axis=1).astype(np.float32)
+            t=np.linspace(0,1,w,dtype=np.float32)[None,:,None]
+            edges=left[:,None,:]*(1-t)+right[:,None,:]*t
+            fill=fill*.40+edges*.60
+            X=np.minimum(np.arange(w),np.arange(w)[::-1]).astype(np.float32)
+            Y=np.minimum(np.arange(h),np.arange(h)[::-1]).astype(np.float32)
+            alpha=(np.clip(X/15,0,1)[None,:]*np.clip(Y/12,0,1)[:,None])[:,:,None]
+            out[y0:y1,x0:x1]=np.uint8(np.clip(im[y0:y1,x0:x1]*(1-alpha)+fill*alpha,0,255))
+            change_mask[y0:y1,x0:x1]=255
+          assert np.array_equal(out[0:1250],im[0:1250]),'VPC wall title was touched'
+          assert np.array_equal(out[1470:],im[1470:]),'Foreground four books or cabinet were touched'
+          assert np.array_equal(out[1250:1470,0:920],im[1250:1470,0:920]),'Left-side room was touched'
+          assert np.array_equal(out[1250:1470,1530:],im[1250:1470,1530:]),'Lamp was touched'
+          assert (out!=im).any()
+          assert cv2.imwrite(str(dst),out,[cv2.IMWRITE_WEBP_QUALITY,96])
+          assert dst.stat().st_size>300000
+          print('Cleared only two blurred back-cabinet book stacks using neighboring unoccupied wall.')
+          print('Verified all pixels outside local background repair masks remain exactly unchanged prior to export.')
+
+          p=Path('index.html')
+          html=p.read_text(encoding='utf-8')
+          old='assets/vpc-scene/vpc-scene-mobile-portrait-final-20261119.webp'
+          new='assets/vpc-scene/vpc-scene-mobile-clear-logo-wall-20261120.webp'
+          assert html.count(old)==1
+          assert html.count('class="vpc-kit-wall-logo"')==1
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          assert 'assets/vpc-kit-original-logo.png' in html
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in html
+          assert 'vpc-clean-mobile-and-original-logo-20261119' in html
+          assert 'function openReader(i)' in html
+          for i in range(4):
+            assert html.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in html
+          assert 'class="art-hotspot art-note-hotspot"' not in html
+          html=html.replace(old,new,1)
+          p.write_text(html,encoding='utf-8')
+          print('Replaced ONE mobile background image URL; desktop, actual four covers, logo source, coordinates and reader unchanged.')
+          PY
+          git diff --check
+      - name: Regression check mobile and desktop before deploy
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          import cv2
+          im=cv2.imread('assets/vpc-scene/vpc-scene-mobile-clear-logo-wall-20261120.webp')
+          assert im is not None and im.shape[:2]==(3200,1800)
+          with sync_playwright() as p:
+            b=p.chromium.launch(headless=True,executable_path='/usr/bin/google-chrome',args=['--no-sandbox'])
+            for w,h in [(375,667),(390,844),(430,932),(1440,900)]:
+              page=b.new_page(viewport={'width':w,'height':h},device_scale_factor=1)
+              errors=[]
+              page.on('pageerror',lambda e:errors.append(str(e)))
+              page.goto(Path('index.html').resolve().as_uri(),wait_until='load')
+              assert page.locator('.art-book').count()==4
+              assert page.locator('.vpc-kit-wall-logo').count()==1
+              assert page.locator('.vpc-kit-wall-logo').evaluate('(e)=>e.complete && e.naturalWidth>0')
+              bg=page.locator('.approved-scene').evaluate('(e)=>getComputedStyle(e).backgroundImage')
+              assert ('mobile-clear-logo-wall' in bg if w<=700 else 'desktop-clean-upper-edges' in bg)
+              if w<=700:
+                assert abs(page.locator('.approved-scene').evaluate('(e)=>e.getBoundingClientRect().width')-w)<2
+              page.locator('.art-book-2').click(force=True)
+              assert page.locator('#reader').evaluate('(e)=>e.classList.contains("open")')
+              assert not errors,errors
+              print('PASS',w,h,'logo loaded, four hotspots and reader functional, no JS errors')
+              page.close()
+            b.close()
+          PY
+      - name: Commit only tested mobile image and its reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene/vpc-scene-mobile-clear-logo-wall-20261120.webp
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Clear two blurred background book stacks beneath original VPC wall logo'
+            git push origin HEAD:main
+          fi
