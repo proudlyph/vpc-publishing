@@ -1,0 +1,98 @@
+name: Correct VPC wall logo plaque placement only
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-wall-logo-plaque-fix-20261119.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  logo-plaque-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add non-stretched wall plaque styling without modifying room or books
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('index.html')
+          h=p.read_text(encoding='utf-8')
+          mark='vpc-wall-logo-plaque-correction-20261119'
+          assert mark not in h, 'Patch already installed'
+          assert h.count('</head>')==1
+          assert h.count('class="vpc-kit-wall-logo"')==1
+          assert h.count('assets/vpc-kit-original-logo.png')==1
+          assert 'vpc-kit-original-logo-only-20261119' in h
+          assert h.count('class="art-hotspot art-book art-book-')==4
+          assert 'vpc-approved-no-note-scene-20261117' in h
+          assert 'function openReader(i)' in h and 'function closeReader()' in h
+          for n in range(4):
+            assert h.count(f'data-book="{n}" onclick="openReader({n})"')==1
+          logo=Path('assets/vpc-kit-original-logo.png')
+          b=logo.read_bytes()
+          sha=hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          assert sha=='c7b7f5f007bbae4e75bd472f419295f15f39b854', 'Original logo changed'
+          # Simple, deliberately lower-priority to neither readers nor book hotspots.
+          # The wall and the four books are part of the existing photographs; never touch.
+          css="""
+          <style id="vpc-wall-logo-plaque-correction-20261119">
+          #office .office-frame.approved-scene > img.vpc-kit-wall-logo {
+            box-sizing:border-box!important;
+            position:absolute!important;
+            display:block!important;
+            z-index:4!important;
+            left:85%!important;
+            top:40.5%!important;
+            width:6%!important;
+            height:auto!important;
+            aspect-ratio:1/1!important;
+            max-width:none!important;
+            transform:translateX(-50%)!important;
+            object-fit:contain!important;
+            object-position:center!important;
+            image-rendering:auto!important;
+            border:2px solid rgba(94,65,38,.52)!important;
+            border-radius:50%!important;
+            padding:3px!important;
+            background:#f7ecd8!important;
+            mix-blend-mode:normal!important;
+            opacity:1!important;
+            filter:drop-shadow(0 2px 2px rgba(44,28,18,.26))!important;
+            box-shadow:0 0 0 1px rgba(255,241,213,.55),0 3px 7px rgba(40,24,12,.15)!important;
+            pointer-events:none!important;
+            user-select:none!important;
+          }
+          @media (max-width:700px) {
+            #office .office-frame.approved-scene > img.vpc-kit-wall-logo {
+              left:72.5%!important;
+              top:38%!important;
+              width:11%!important;
+              padding:2px!important;
+              border-width:1.5px!important;
+              filter:drop-shadow(0 1px 2px rgba(44,28,18,.22))!important;
+            }
+          }
+          </style>
+          """
+          h=h.replace('</head>',css+'</head>',1)
+          assert mark in h
+          p.write_text(h,encoding='utf-8')
+          print('Corrected logo wall placement and finish only: ivory circular plaque, no blend mode, raised above furniture.')
+          print('Original logo file unchanged. No desktop/mobile artwork or interactions modified.')
+          PY
+          git diff --check
+          git diff --stat
+      - name: Commit logo-only patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Finish wall logo as raised ivory plaque without altering VPC scenes'
+            git push origin HEAD:main
+          fi
