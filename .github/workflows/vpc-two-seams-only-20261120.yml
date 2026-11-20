@@ -1,0 +1,128 @@
+name: Repair VPC two mobile photo seams only
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-two-seams-only-20261120.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image and browser regression dependencies
+        run: python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "opencv-python-headless==4.11.0.86" "playwright>=1.55,<1.60"
+      - name: Fix both photo joins without recompositing book art
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import cv2,numpy as np,hashlib
+          folder=Path('assets/vpc-scene')
+          old=folder/'vpc-scene-mobile-clear-logo-wall-20261120.webp'
+          new=folder/'vpc-scene-mobile-joined-clean-20261120.webp'
+          raw=old.read_bytes()
+          sha=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+          assert sha=='95e9ad84691f72c989a468ad1d4462351b76a0dc',f'Unexpected source: {sha}'
+          image=cv2.imdecode(np.frombuffer(raw,dtype=np.uint8),cv2.IMREAD_COLOR)
+          assert image is not None and image.shape[:2]==(3200,1800)
+          original=image.copy()
+          H,W=image.shape[:2]
+          # Source is 2x portrait art. The two artificial transitions are
+          # near y=440..506 and 2360..2428. Only these bands can change.
+          # Adaptive blending heals discontinuities but keeps the upper original
+          # shelves, middle wall, and all four front-cover pixels in place.
+          for a,b in [(412,540),(2325,2458)]:
+              # Preserve real scene on both sides; remove the superimposed
+              # narrow artificial stripe through a guided 1-D reconstruction.
+              top=image[a-20:a].astype(np.float32).mean(axis=0)
+              bottom=image[b:b+20].astype(np.float32).mean(axis=0)
+              h=b-a
+              ramp=np.linspace(0,1,h,dtype=np.float32)[:,None,None]
+              envelope=(top[None,:,:]*(1-ramp)+bottom[None,:,:]*ramp)
+              # Borrow nearby photographic fine grain rather than making a
+              # flat gradient. This keeps the repaired sections natural.
+              top_texture=image[a-35:a-5].astype(np.float32)
+              bottom_texture=image[b+5:b+35].astype(np.float32)
+              top_grain=top_texture-np.mean(top_texture,axis=0,keepdims=True)
+              bottom_grain=bottom_texture-np.mean(bottom_texture,axis=0,keepdims=True)
+              idx=np.linspace(0,len(top_grain)-1,h).astype(int)
+              grain=top_grain[idx]*(1-ramp)+bottom_grain[idx]*ramp
+              repaired=np.clip(envelope+grain*.44,0,255).astype(np.uint8)
+              # Slightly feather 8px at both junctions while keeping a precise
+              # change boundary; no image resizing, no new book geometry.
+              image[a:b]=repaired
+              for k in range(8):
+                  alpha=(k+1)/9.
+                  image[a+k]=np.uint8(np.clip(original[a+k]*(1-alpha)+image[a+k]*alpha,0,255))
+                  image[b-1-k]=np.uint8(np.clip(original[b-1-k]*(1-alpha)+image[b-1-k]*alpha,0,255))
+          assert np.array_equal(image[560:2310],original[560:2310]),'Logo or foreground books modified'
+          assert np.array_equal(image[:400],original[:400])
+          assert np.array_equal(image[2480:],original[2480:])
+          for a,b in [(412,540),(2325,2458)]:
+              def score(im):
+                  x=im[a-3:b+3].astype(np.float32)
+                  return float(np.mean(np.abs(np.diff(x,axis=0))))
+              old_score=score(original)
+              new_score=score(image)
+              print('Seam band',a,b,'original edge variation',old_score,'repair variation',new_score)
+              assert new_score<old_score*.90,'Repair not smoother than source'
+          assert cv2.imwrite(str(new),image,[cv2.IMWRITE_WEBP_QUALITY,97])
+          assert 300000<new.stat().st_size<5000000
+          html_path=Path('index.html')
+          s=html_path.read_text(encoding='utf-8')
+          a='assets/vpc-scene/vpc-scene-mobile-clear-logo-wall-20261120.webp'
+          b='assets/vpc-scene/vpc-scene-mobile-joined-clean-20261120.webp'
+          assert s.count(a)==1
+          assert s.count('class="art-hotspot art-book art-book-')==4
+          assert s.count('class="vpc-kit-wall-logo"')==1
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in s
+          assert 'function openReader(i)' in s
+          for n in range(4):
+              assert s.count(f'data-book="{n}" onclick="openReader({n})"')==1
+          s=s.replace(a,b,1)
+          html_path.write_text(s,encoding='utf-8')
+          print('Only the two narrow mobile-photo join bands and one URL changed.')
+          PY
+          git diff --check
+      - name: Run browser interaction checks
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,executable_path='/usr/bin/google-chrome',args=['--no-sandbox'])
+            for w,h in [(375,667),(390,844),(430,932),(1440,900)]:
+              page=browser.new_page(viewport={'width':w,'height':h})
+              errors=[]
+              page.on('pageerror',lambda e:errors.append(str(e)))
+              page.goto(Path('index.html').resolve().as_uri(),wait_until='load')
+              assert page.locator('.art-book').count()==4
+              assert page.locator('.vpc-kit-wall-logo').evaluate('(e)=>e.complete&&e.naturalWidth>0')
+              bg=page.locator('.approved-scene').evaluate('(e)=>getComputedStyle(e).backgroundImage')
+              assert ('mobile-joined-clean-20261120' in bg if w<=700 else 'desktop-clean-upper-edges' in bg)
+              page.locator('.art-book-1').click(force=True)
+              assert page.locator('#reader').evaluate('(r)=>r.classList.contains("open")')
+              assert not errors,errors
+              print('PASS',w,h,'background logo and reader')
+              page.close()
+            browser.close()
+          PY
+      - name: Commit only checked changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene/vpc-scene-mobile-joined-clean-20261120.webp
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Heal two mobile background photo seams; retain original VPC wall and books'
+            git push origin HEAD:main
+          fi
