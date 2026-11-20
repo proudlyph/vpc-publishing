@@ -1,0 +1,49 @@
+name: Restore VPC mobile image before destructive seam smear
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-restore-unsmeared-mobile-20261120.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore previous photo asset without altering anything else
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path("index.html")
+          content=p.read_text(encoding="utf-8")
+          bad="assets/vpc-scene/vpc-scene-mobile-joined-clean-20261120.webp"
+          good="assets/vpc-scene/vpc-scene-mobile-clear-logo-wall-20261120.webp"
+          assert content.count(bad)==1 and content.count(good)==0,"Unexpected references: do not change"
+          asset=Path(good)
+          assert asset.is_file()
+          raw=asset.read_bytes()
+          sha=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+          assert sha=="95e9ad84691f72c989a468ad1d4462351b76a0dc","Unexpected prior asset"
+          assert content.count('class="art-hotspot art-book art-book-')==4
+          assert content.count('class="vpc-kit-wall-logo"')==1
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in content
+          for n in range(4):
+              assert content.count(f'data-book="{n}" onclick="openReader({n})"')==1
+          content=content.replace(bad,good,1)
+          p.write_text(content,encoding="utf-8")
+          print("Reverted image reference to previous un-smeared version; 0 image pixel changes or book/reader edits.")
+          PY
+          git diff --check
+      - name: Publish safe restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Restore VPC mobile photo before destructive seam blur'
+          git push origin HEAD:main
