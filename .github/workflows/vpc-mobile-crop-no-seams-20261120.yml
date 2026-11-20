@@ -1,0 +1,154 @@
+name: Replace stitched VPC mobile composition with seamless single-scene crop
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-mobile-crop-no-seams-20261120.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  crop-test-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Image and browser test libraries
+        run: python -m pip install --disable-pip-version-check "pillow>=10,<12" "playwright>=1.55,<1.60"
+      - name: Remove stitched regions, preserve book pixels and re-map clickable areas
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from PIL import Image
+          from playwright.sync_api import sync_playwright
+
+          root=Path('assets/vpc-scene')
+          original=root/'vpc-scene-mobile-clear-logo-wall-20261120.webp'
+          changed=root/'vpc-scene-mobile-no-stitch-reflow-20261120.webp'
+          b=original.read_bytes()
+          sha=hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          assert sha=='95e9ad84691f72c989a468ad1d4462351b76a0dc', 'Unexpected source: refusing change'
+          photo=Image.open(original).convert('RGB')
+          assert photo.size==(1800,3200)
+
+          # Physical pixel map. Remove original top 265 logical pixels (the first
+          # photo tile and its horizontal duplicate shelf join). Preserve the
+          # whole photographed wall and actual book-cover pixels at 1:1 scale.
+          scale=2
+          cut=265
+          y0=810
+          y1=1200
+          n0=605
+          n1=995
+          w,h=photo.size
+          composed=Image.new('RGB',(w,h))
+          upper=photo.crop((0,cut*scale,w,y0*scale)).resize((w,n0*scale),Image.Resampling.LANCZOS)
+          composed.paste(upper,(0,0))
+          books=photo.crop((0,y0*scale,w,y1*scale))
+          composed.paste(books,(0,n0*scale)) # No resampling of printed original book pixel detail
+          lower=photo.crop((0,y1*scale,w,h)).resize((w,(1600-n1)*scale),Image.Resampling.LANCZOS)
+          composed.paste(lower,(0,n1*scale))
+          assert composed.crop((0,n0*scale,w,n1*scale)).tobytes()==books.tobytes(), 'Book image changed'
+          composed.save(changed,'WEBP',quality=97,method=6)
+          assert changed.stat().st_size>300_000
+
+          def remap(oldy):
+            if oldy<=y0:
+              return (oldy-cut)*(n0/(y0-cut))
+            if oldy<=y1:
+              return n0+(oldy-y0)
+            return n1+(oldy-y1)*((1600-n1)/(1600-y1))
+
+          src=Path('index.html')
+          html=src.read_text(encoding='utf-8')
+          current='assets/vpc-scene/vpc-scene-mobile-clear-logo-wall-20261120.webp'
+          dest='assets/vpc-scene/vpc-scene-mobile-no-stitch-reflow-20261120.webp'
+          assert html.count(current)==1
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          assert html.count('class="vpc-kit-wall-logo"')==1
+          assert 'vpc-clean-mobile-and-original-logo-20261119' in html
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in html
+          assert 'function openReader(i)' in html and 'function closeReader()' in html
+          for i in range(4):
+            assert html.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          assert 'https://www.lazada.com.ph/shop/vpc-publishing/' in html
+
+          # Measure the ACTUAL old book hotspot geometry in a Chromium layout
+          # before replacing the photo; re-map exact coordinates afterward.
+          geometry={}
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,executable_path='/usr/bin/google-chrome',args=['--no-sandbox'])
+            page=browser.new_page(viewport={'width':390,'height':844})
+            page.goto(Path('index.html').resolve().as_uri(),wait_until='load')
+            geometry=page.evaluate("""() => {
+              const box=document.querySelector('.approved-scene').getBoundingClientRect();
+              const each={};
+              for(const el of document.querySelectorAll('.art-book')) {
+                const r=el.getBoundingClientRect();
+                each[el.getAttribute('data-book')]={x:100*(r.left-box.left)/box.width,y:1600*(r.top-box.top)/box.height,w:100*r.width/box.width,h:1600*r.height/box.height};
+              }
+              return each;
+            }""")
+            browser.close()
+          assert set(geometry)=={'0','1','2','3'},geometry
+          css=["<style id='vpc-seamless-crop-coordinates-20261120'>","@media(max-width:700px){"]
+          for i in range(4):
+            g=geometry[str(i)]
+            y1v=remap(g['y'])
+            y2v=remap(g['y']+g['h'])
+            assert 0<=y1v<y2v<=1600, (i,g,y1v,y2v)
+            css.append(f'#office .approved-scene .art-book[data-book="{i}"]'+'{'+f'top:{100*y1v/1600:.6f}%!important;height:{100*(y2v-y1v)/1600:.6f}%!important;'+'}')
+            print('Mapped book',i,'from',g,'to',{ 'top_percent':100*y1v/1600, 'height_percent':100*(y2v-y1v)/1600})
+          css.append('#office .approved-scene > img.vpc-kit-wall-logo { top:21.6%!important; }')
+          css.append('}')
+          css.append('</style>')
+          assert html.count('</head>')==1
+          html=html.replace('</head>','\n'.join(css)+'</head>',1)
+          html=html.replace(current,dest,1)
+          src.write_text(html,encoding='utf-8')
+          print('Removed entire source with duplicated upper shelf; preserved all original book pixels and image center; recalculated four tap areas and original logo location.')
+          PY
+          git diff --check
+      - name: Visual layout and interaction regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,executable_path='/usr/bin/google-chrome',args=['--no-sandbox'])
+            for w,h in [(375,667),(390,844),(430,932),(1440,900)]:
+              page=browser.new_page(viewport={'width':w,'height':h},device_scale_factor=1)
+              errors=[]
+              page.on('pageerror',lambda e:errors.append(str(e)))
+              page.goto(Path('index.html').resolve().as_uri(),wait_until='load')
+              assert page.locator('.art-book').count()==4
+              assert page.locator('.vpc-kit-wall-logo').evaluate('(e)=>e.complete&&e.naturalWidth>0')
+              bg=page.locator('.approved-scene').evaluate('(e)=>getComputedStyle(e).backgroundImage')
+              assert ('mobile-no-stitch-reflow-20261120' in bg if w<=700 else 'desktop-clean-upper-edges' in bg),bg
+              for i in range(4):
+                r=page.locator(f'.art-book[data-book="{i}"]').bounding_box()
+                assert r is not None and r['width']>25 and r['height']>40,(i,r)
+                assert r['x']>=-3 and r['x']+r['width']<=w+5,(i,r)
+              page.locator('.art-book[data-book="2"]').click(force=True)
+              assert page.locator('#reader').evaluate('(r)=>r.classList.contains("open")')
+              assert not errors,errors
+              print('PASS viewport',w,h,'all 4 book areas, logo and reader')
+              page.close()
+            browser.close()
+          PY
+      - name: Publish tested photo and aligned hotspots
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add index.html assets/vpc-scene/vpc-scene-mobile-no-stitch-reflow-20261120.webp
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Remove stitched mobile bookshelf entirely and re-align authentic book hotspots'
+          git push origin HEAD:main
