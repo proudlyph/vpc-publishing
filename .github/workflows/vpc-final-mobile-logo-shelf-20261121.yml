@@ -1,0 +1,141 @@
+name: VPC final mobile logo and lower shelf correction
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-final-mobile-logo-shelf-20261121.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify-then-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deterministic imaging and browser tools
+        run: python -m pip install --disable-pip-version-check "Pillow>=10,<12" "playwright>=1.55,<1.60"
+      - name: Apply visually inspected strip removal and fix higher-specificity logo position
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          from PIL import Image
+          src=Path('assets/vpc-scene/vpc-scene-mobile-no-stitch-reflow-20261120.webp')
+          raw=src.read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == 'cac1e6621b67b6a051951912d9b5ad5d50a07d81','Unexpected current source: stop before any changes'
+          im=Image.open(src).convert('RGB')
+          assert im.size==(1800,3200)
+          cut_top,cut_end=1980,2070
+          out=Image.new('RGB',(1800,3200))
+          top=im.crop((0,0,1800,cut_top))
+          out.paste(top,(0,0))
+          lower=im.crop((0,cut_end,1800,3200)).resize((1800,3200-cut_top),Image.Resampling.LANCZOS)
+          out.paste(lower,(0,cut_top))
+          assert out.crop((0,0,1800,cut_top)).tobytes()==top.tobytes(),'Foreground books changed'
+          target=Path('assets/vpc-scene/vpc-scene-mobile-final-shelf-20261121.webp')
+          out.save(target,'WEBP',quality=97,method=6)
+          assert 300000<target.stat().st_size<5000000
+          page=Path('index.html')
+          html=page.read_text(encoding='utf-8')
+          old='assets/vpc-scene/vpc-scene-mobile-no-stitch-reflow-20261120.webp'
+          new='assets/vpc-scene/vpc-scene-mobile-final-shelf-20261121.webp'
+          assert html.count(old)==1
+          assert html.count('class="vpc-kit-wall-logo"')==1
+          assert html.count('class="art-hotspot art-book art-book-')==4
+          assert 'vpc-clean-mobile-and-original-logo-20261119' in html
+          assert 'vpc-seamless-crop-coordinates-20261120' in html
+          assert 'assets/vpc-scene/vpc-scene-desktop-clean-upper-edges-20261118.webp' in html
+          assert 'function openReader(i)' in html and 'function closeReader()' in html
+          for i in range(4):
+             assert html.count(f'data-book="{i}" onclick="openReader({i})"')==1
+          # Keep existing book hotspot percentage positions, because the 4 book
+          # pixels above y=1980 are byte-identical. The bottom strip alone moves.
+          assert 'vpc-logo-and-shelf-final-20261121' not in html
+          fix = """
+          <style id="vpc-logo-and-shelf-final-20261121">
+          @media (max-width: 700px) {
+             /* This selector intentionally matches the high-specificity older
+                mobile rule, so the original logo stays on the WALL, not books. */
+             #office .office-frame.approved-scene > img.vpc-kit-wall-logo {
+               left:72.5%!important;
+               top:23.5%!important;
+               width:10%!important;
+               height:auto!important;
+               transform:translateX(-50%)!important;
+               border:0!important;
+               padding:0!important;
+               background:transparent!important;
+               box-shadow:none!important;
+               filter:none!important;
+               mix-blend-mode:multiply!important;
+             }
+          }
+          </style>
+          """
+          assert html.count('</head>')==1
+          html=html.replace(old,new,1).replace('</head>',fix+'</head>',1)
+          page.write_text(html,encoding='utf-8')
+          print('Visually checked 1980:2070 strip removed; logo at wall 23.5%; all 4 cover pixels and desktop untouched')
+          PY
+          git diff --check
+      - name: Render and inspect browser geometry, photos and interactions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          from PIL import Image
+          import math
+          with sync_playwright() as p:
+            b=p.chromium.launch(headless=True,executable_path='/usr/bin/google-chrome',args=['--no-sandbox'])
+            for w,h in [(375,667),(390,844),(430,932),(1440,900)]:
+              page=b.new_page(viewport={'width':w,'height':h},device_scale_factor=1)
+              errors=[]
+              page.on('pageerror',lambda e:errors.append(str(e)))
+              page.goto(Path('index.html').resolve().as_uri(),wait_until='load')
+              assert page.locator('.art-book').count()==4
+              assert page.locator('.vpc-kit-wall-logo').evaluate('(e)=>e.complete && e.naturalWidth>0')
+              layout=page.evaluate("""() => {
+                const frame=document.querySelector('#office .office-frame.approved-scene');
+                const logo=document.querySelector('.vpc-kit-wall-logo');
+                const r=frame.getBoundingClientRect(),l=logo.getBoundingClientRect();
+                return {background:getComputedStyle(frame).backgroundImage,
+                  frame:[r.x,r.y,r.width,r.height],
+                  logo:[l.x,l.y,l.width,l.height],
+                  books:[...document.querySelectorAll('.art-book')].map(e=>{
+                    const b=e.getBoundingClientRect();return[b.x,b.y,b.width,b.height]})}
+              }""")
+              assert ('mobile-final-shelf-20261121' in layout['background'] if w<=700 else 'desktop-clean-upper-edges' in layout['background'])
+              for box in layout['books']:
+                 assert box[2]>25 and box[3]>40
+              if w<=700:
+                 x,y,fw,fh=layout['frame']
+                 lx,ly,lw,lh=layout['logo']
+                 assert abs(fw-w)<2 and abs(fh-h)<2
+                 assert 0.225<(ly-y)/fh<0.25,('Logo incorrect vertical position',layout)
+                 assert (ly+lh-y)/fh<0.31,('Logo too low, overlaps desk',layout)
+                 assert ly+lh<min(z[1] for z in layout['books'])-40,('Logo overlaps books',layout)
+              page.screenshot(path=f'/tmp/vpc-checked-{w}.png')
+              page.locator('.art-book[data-book="2"]').click(force=True)
+              assert page.locator('#reader').evaluate('(r)=>r.classList.contains("open")')
+              assert not errors,errors
+              print('PASS',w,h,'logo wall placement; original books with reader, no errors')
+              page.close()
+            b.close()
+          PY
+      - name: Publish only on successful tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add index.html assets/vpc-scene/vpc-scene-mobile-final-shelf-20261121.webp
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Keep Tito Kit logo on wall and remove duplicated lower bookshelf strip'
+          git push origin HEAD:main
