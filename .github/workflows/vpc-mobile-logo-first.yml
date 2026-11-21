@@ -1,0 +1,68 @@
+name: Publish VPC mobile logo above the publisher name
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-mobile-logo-first.yml'
+permissions:
+  contents: write
+jobs:
+  publish-layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install Pillow
+      - name: Apply verified mobile layout
+        run: |
+          set -euo pipefail
+          test "$(git hash-object index.html)" = e9f033007a5a0a6f3225adb691f6516a8de57644
+          test "$(git hash-object assets/vpc-scene/vpc-scene-mobile-single-shelf.webp)" = c806c5a5679d3482eabc33dc7c60603775004558
+          python - <<'PYTHON'
+          from pathlib import Path
+          import base64
+          from io import BytesIO
+          from PIL import Image
+
+          scene = Path('assets/vpc-scene/vpc-scene-mobile-single-shelf.webp')
+          artwork = Image.open(scene).convert('RGB')
+          assert artwork.size == (941, 1262)
+          wall = Image.open(BytesIO(base64.b64decode('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')))
+          artwork.paste(wall, (510, 275))
+          artwork.save(scene.with_name('vpc-scene-mobile-logo-first.webp'), lossless=True)
+
+          page = Path('index.html')
+          html = page.read_text(encoding='utf-8')
+          replacements = {
+              'assets/vpc-scene/vpc-scene-mobile-single-shelf.webp': 'assets/vpc-scene/vpc-scene-mobile-logo-first.webp',
+              '''    top: 37.5% !important;
+              width: 10% !important;''': '''    top: auto !important;
+              bottom: 64% !important;
+              width: min(25%, 73px) !important;
+            }
+
+            #office .approved-scene .vpc-mobile-wall-name {
+              display: block;
+              position: absolute;
+              z-index: 5;
+              left: 72.5%;
+              top: 36.8%;
+              transform: translateX(-50%);
+              color: #3b2412;
+              font: 700 10px/1.2 Arial, sans-serif;
+              white-space: nowrap;
+              pointer-events: none;''',
+              '<style id="vpc-mobile-single-shelf">': '''<style id="vpc-mobile-single-shelf">
+          .vpc-mobile-wall-name { display: none; }''',
+              '<button class="art-hotspot art-book art-book-1"': '    <span class="vpc-mobile-wall-name" aria-hidden="true">VPC PUBLISHING</span>\n    <button class="art-hotspot art-book art-book-1"',
+          }
+          for old, new in replacements.items():
+              assert html.count(old) == 1, old
+              html = html.replace(old, new, 1)
+          page.write_text(html, encoding='utf-8')
+          PYTHON
+          git diff --check
+          git add index.html assets/vpc-scene/vpc-scene-mobile-logo-first.webp
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Place the original logo above VPC Publishing on mobile'
+          git push origin HEAD:main
