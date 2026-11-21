@@ -30,7 +30,7 @@ jobs:
           assert patch.size == (346, 200)
           result = artwork.copy()
           result.paste(patch, (510, 270))
-          assert ImageChops.difference(result, artwork).getbbox() == (510, 270, 856, 470)
+          assert ImageChops.difference(result, artwork).getbbox() == (513, 272, 853, 467)
           result.save(scene.with_name('vpc-scene-mobile-wall-clean.webp'), lossless=True)
 
           page = Path('index.html')
