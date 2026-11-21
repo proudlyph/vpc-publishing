@@ -1445,13 +1445,14 @@ button{-webkit-tap-highlight-color:transparent}
 </style>
 
 <style id="vpc-mobile-single-shelf">
+.vpc-mobile-wall-name { display: none; }
 @media (max-width: 700px) {
   /* Keep the artwork and its controls in the same undistorted coordinate space. */
   #office .office-frame.approved-scene {
     width: min(100vw, calc(100dvh * 941 / 1262)) !important;
     height: min(100dvh, calc(100vw * 1262 / 941)) !important;
     aspect-ratio: 941 / 1262 !important;
-    background-image: url("assets/vpc-scene/vpc-scene-mobile-single-shelf.webp") !important;
+    background-image: url("assets/vpc-scene/vpc-scene-mobile-logo-first.webp") !important;
   }
 
   #office .approved-scene .art-book {
@@ -1479,8 +1480,22 @@ button{-webkit-tap-highlight-color:transparent}
 
   #office .office-frame.approved-scene > img.vpc-kit-wall-logo {
     left: 72.5% !important;
-    top: 37.5% !important;
-    width: 10% !important;
+    top: auto !important;
+    bottom: 64% !important;
+    width: min(25%, 73px) !important;
+  }
+
+  #office .approved-scene .vpc-mobile-wall-name {
+    display: block;
+    position: absolute;
+    z-index: 5;
+    left: 72.5%;
+    top: 36.8%;
+    transform: translateX(-50%);
+    color: #3b2412;
+    font: 700 10px/1.2 Arial, sans-serif;
+    white-space: nowrap;
+    pointer-events: none;
   }
 
   #office .approved-scene .art-scene-hint {
@@ -1494,7 +1509,8 @@ button{-webkit-tap-highlight-color:transparent}
 <main id="office" aria-label="VPC Publishing office">
   <div class="office-frame approved-scene">
     <img class="vpc-kit-wall-logo" src="assets/vpc-kit-original-logo.png" alt="I’d Like to Speak Filipino handshake emblem" width="220" height="220" decoding="async" draggable="false">
-<button class="art-hotspot art-book art-book-1" aria-label="Open I’d Like to Speak Filipino 1" data-book="0" onclick="openReader(0)"></button>
+    <span class="vpc-mobile-wall-name" aria-hidden="true">VPC PUBLISHING</span>
+    <button class="art-hotspot art-book art-book-1" aria-label="Open I’d Like to Speak Filipino 1" data-book="0" onclick="openReader(0)"></button>
     <button class="art-hotspot art-book art-book-2" aria-label="Open I’d Like to Speak Filipino 2" data-book="1" onclick="openReader(1)"></button>
     <button class="art-hotspot art-book art-book-3" aria-label="Open I’d Like to Speak Filipino 3" data-book="2" onclick="openReader(2)"></button>
     <button class="art-hotspot art-book art-book-4" aria-label="Open I’d Like to Speak Filipino 4" data-book="3" onclick="openReader(3)"></button>
