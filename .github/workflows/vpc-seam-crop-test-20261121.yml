@@ -1,0 +1,39 @@
+name: Preview-only VPC lower edge removal variants
+on:
+  push:
+    paths:
+      - '.github/workflows/vpc-seam-crop-test-20261121.yml'
+permissions:
+  contents: read
+jobs:
+  previews:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test photo-only variants; no publishing
+        run: |
+          python -m pip install --disable-pip-version-check "Pillow>=10,<12"
+          python - <<'PY'
+          from PIL import Image
+          import io,base64
+          pic=Image.open('assets/vpc-scene/vpc-scene-mobile-no-stitch-reflow-20261120.webp').convert('RGB')
+          assert pic.size==(1800,3200)
+          def publish(name,im):
+            out=io.BytesIO();im.resize((450,800),Image.Resampling.LANCZOS).save(out,'JPEG',quality=68)
+            print('PREVIEW_START:'+name)
+            print(base64.b64encode(out.getvalue()).decode())
+            print('PREVIEW_END:'+name)
+          publish('original',pic)
+          # Original front book pixels are in source y=1210..1990.
+          # Remove *only* sections below them.
+          for name,cut_top,cut_end in [('a',1990,2050),('b',1980,2070),('c',1980,2110),('d',1970,2090)]:
+            im=Image.new('RGB',(1800,3200))
+            im.paste(pic.crop((0,0,1800,cut_top)),(0,0))
+            lower=pic.crop((0,cut_end,1800,3200))
+            stretched=lower.resize((1800,3200-cut_top),Image.Resampling.LANCZOS)
+            im.paste(stretched,(0,cut_top))
+            publish(name,im)
+          PY
